@@ -1,0 +1,462 @@
+# name: test/mock/connect.test
+# description: CONNECT to an attach handle runs each statement as a redshift_query call on that handle, with messages written for CONNECT
+# group: [mock]
+
+require-env REDSHIFT_TEST_CLIENT mock
+
+require redshift
+
+# Opens, Describes and executions are counted from the lines the mock logs. With no directive, the
+# mock returns one VARCHAR column c0 holding the statement text it received.
+statement ok
+CALL enable_logging(level = 'debug');
+
+statement ok
+CREATE MACRO mock_opened() AS (SELECT count(*) FROM duckdb_logs WHERE message LIKE 'redshift mock: opened a connection to %');
+
+statement ok
+CREATE MACRO mock_described() AS (SELECT count(*) FROM duckdb_logs WHERE message LIKE 'redshift mock: described a statement on %');
+
+statement ok
+CREATE MACRO mock_executed() AS (SELECT count(*) FROM duckdb_logs WHERE message LIKE 'redshift mock: executed a statement on %');
+
+statement ok
+ATTACH '' AS rs (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+statement ok
+CREATE TABLE local (i INTEGER);
+
+# The CONNECT-ed session is con1; the counts and local work run on the default connection. CONNECT
+# opens nothing on Redshift: the one open is the ATTACH's, of the default connection's session.
+statement ok con1
+CONNECT rs;
+
+query III
+SELECT mock_opened(), mock_described(), mock_executed();
+----
+1	0	0
+
+# ---------------------------------------------------------------------------
+# Each statement runs as one redshift_query call on the handle, with the text DuckDB passes:
+# what the user typed, up to the next statement, terminator included.
+# ---------------------------------------------------------------------------
+query I con1
+SELECT 1 AS not_parsed_by_duckdb;
+----
+SELECT 1 AS not_parsed_by_duckdb;
+
+query III
+SELECT mock_opened(), mock_described(), mock_executed();
+----
+2	1	1
+
+query II con1
+rows=2 cols=2;
+----
+r0c0	r0c1
+r1c0	r1c1
+
+# A statement without a result set: the row count, as redshift_query gives it.
+query I con1
+norows rowcount=3;
+----
+3
+
+# DuckDB splits the input at terminators, outside quotes and dollar quotes, so a dollar-quoted body
+# with a terminator in it arrives whole, and two statements arrive as two calls: six so far.
+query I con1
+CREATE PROCEDURE p() AS $$ BEGIN SELECT 1; END; $$ LANGUAGE plpgsql;
+----
+CREATE PROCEDURE p() AS $$ BEGIN SELECT 1; END; $$ LANGUAGE plpgsql;
+
+statement ok con1
+SELECT 'first'; SELECT 'second';
+
+query III
+SELECT mock_opened(), mock_described(), mock_executed();
+----
+2	6	6
+
+# Transaction statements are Redshift's: the user's own Redshift transaction.
+query I con1
+BEGIN;
+----
+BEGIN;
+
+query I con1
+COMMIT;
+----
+COMMIT;
+
+query I con1
+ROLLBACK;
+----
+ROLLBACK;
+
+# So are the statements DuckDB would otherwise run itself, and CONNECT: while CONNECT-ed, DuckDB
+# parses only DISCONNECT.
+query I con1
+SET search_path TO public;
+----
+SET search_path TO public;
+
+query I con1
+ATTACH 'x' AS y;
+----
+ATTACH 'x' AS y;
+
+query I con1
+PREPARE q AS SELECT 1;
+----
+PREPARE q AS SELECT 1;
+
+query I con1
+CONNECT rs;
+----
+CONNECT rs;
+
+# A Redshift refusal passes through unchanged.
+statement error con1
+error=no_such_table;
+----
+no_such_table
+
+# An aborted Redshift transaction's guidance gives ROLLBACK as the statement to type.
+statement error con1
+error=aborted sqlstates=25P02;
+----
+<REGEX>:.*The Redshift transaction on attach handle "rs" is aborted, so Redshift refuses every statement until it ends\. Run ROLLBACK to end it\..*
+
+# A lost connection's report is CONNECT's, and names the next statement, not redshift_query.
+statement error con1
+rows=1 lose=execute;
+----
+<REGEX>:IO Error: CONNECT: the Redshift connection of attach handle "rs" was lost .* the next statement on this handle from this DuckDB connection starts a new, empty Redshift session\..*
+
+# A statement whose columns changed since bind was not run, and can be run again.
+statement error con1
+types=int4 changed=int8;
+----
+<REGEX>:.*CONNECT: the statement on attach handle "rs" now returns different columns than when it was bound, so it was not run on Redshift\. Run it again\..*
+
+statement ok con1
+DISCONNECT;
+
+# Local SQL again, and a second DISCONNECT is DuckDB's error.
+query I
+SELECT count(*) FROM local;
+----
+0
+
+statement error con1
+DISCONNECT;
+----
+no active CONNECT
+
+# ---------------------------------------------------------------------------
+# CONNECT to a handle inside a DuckDB transaction is refused at bind, before anything is
+# CONNECT-ed or sent, so ROLLBACK and COMMIT stay DuckDB's. (The gate for a statement routed inside a
+# transaction, reached only when a client API turns autocommit off after CONNECT, is in
+# test_connect.cpp.)
+# ---------------------------------------------------------------------------
+query III
+SELECT mock_opened(), mock_described(), mock_executed();
+----
+3	15	14
+
+statement ok
+BEGIN;
+
+statement ok
+INSERT INTO local VALUES (1);
+
+statement error
+CONNECT rs;
+----
+Binder Error: CONNECT: cannot CONNECT to attach handle "rs" while a DuckDB transaction is open, because DuckDB COMMIT or ROLLBACK does not control Redshift operations. This error has aborted the DuckDB transaction: under the transaction's invalidation policy, every error does. Run ROLLBACK (COMMIT would also roll it back, without an error), then CONNECT again outside a DuckDB transaction, and enable autocommit if your client disabled it.
+
+# Not CONNECT-ed, so ROLLBACK is DuckDB's.
+statement ok
+ROLLBACK;
+
+query I
+SELECT count(*) FROM local;
+----
+0
+
+# A transaction an earlier error aborted: the refusal says so.
+statement ok
+BEGIN;
+
+statement error
+SELECT 1 / 'x';
+----
+
+statement error
+CONNECT rs;
+----
+Binder Error: CONNECT: cannot CONNECT to attach handle "rs" while a DuckDB transaction is open, because DuckDB COMMIT or ROLLBACK does not control Redshift operations. The DuckDB transaction was already aborted by an earlier error. Run ROLLBACK (COMMIT would also roll it back, without an error), then CONNECT again outside a DuckDB transaction, and enable autocommit if your client disabled it.
+
+statement ok
+ROLLBACK;
+
+# Under SYNTACTIC_ERRORS_DO_NOT_INVALIDATE the refusal leaves the DuckDB transaction usable, and
+# COMMIT keeps its work.
+statement ok
+SET default_transaction_invalidation_policy = 'SYNTACTIC_ERRORS_DO_NOT_INVALIDATE';
+
+statement ok
+BEGIN;
+
+statement ok
+INSERT INTO local VALUES (2);
+
+statement error
+CONNECT rs;
+----
+Binder Error: CONNECT: cannot CONNECT to attach handle "rs" while a DuckDB transaction is open, because DuckDB COMMIT or ROLLBACK does not control Redshift operations. The DuckDB transaction is still usable: commit or roll it back, then CONNECT again outside a DuckDB transaction, and enable autocommit if your client disabled it.
+
+statement ok
+COMMIT;
+
+query I
+SELECT i FROM local;
+----
+2
+
+statement ok
+RESET default_transaction_invalidation_policy;
+
+statement ok
+DELETE FROM local;
+
+# redshift_allow_query_in_duckdb_transaction does not lift the refusal: while CONNECT-ed, DuckDB
+# sends COMMIT and ROLLBACK to Redshift.
+statement ok
+SET redshift_allow_query_in_duckdb_transaction = true;
+
+statement ok
+BEGIN;
+
+statement error
+CONNECT rs;
+----
+Binder Error: CONNECT: cannot CONNECT to attach handle "rs" while a DuckDB transaction is open, because DuckDB COMMIT or ROLLBACK does not control Redshift operations. This error has aborted the DuckDB transaction: under the transaction's invalidation policy, every error does. Run ROLLBACK (COMMIT would also roll it back, without an error), then CONNECT again outside a DuckDB transaction, and enable autocommit if your client disabled it.
+
+statement ok
+ROLLBACK;
+
+statement ok
+RESET redshift_allow_query_in_duckdb_transaction;
+
+# A name no database has is DuckDB's to refuse, in a transaction too.
+statement ok
+BEGIN;
+
+statement error
+CONNECT nosuch;
+----
+Database "nosuch" is not attached
+
+statement ok
+ROLLBACK;
+
+# Only a Redshift handle's CONNECT is refused here: another database's is DuckDB's to answer, and the
+# string form, whose string is a path and not a handle's name, meets the handle's ATTACH.
+statement ok
+BEGIN;
+
+statement error
+CONNECT memory;
+----
+does not support CONNECT
+
+statement ok
+ROLLBACK;
+
+statement ok
+BEGIN;
+
+statement error
+CONNECT 'rs' (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+----
+Invalid CONNECT: CONNECT to a string or an external resource is not supported for redshift
+
+statement ok
+ROLLBACK;
+
+# SQL can neither prepare nor EXPLAIN a CONNECT, both DuckDB's refusals; the C++ API's prepare is in
+# test_connect.cpp.
+statement error
+PREPARE connect_rs AS CONNECT rs;
+----
+CONNECT_STATEMENT is not a preparable statement
+
+statement error
+EXPLAIN ANALYZE CONNECT rs;
+----
+syntax error at or near "CONNECT"
+
+# Nothing above reached Redshift.
+query III
+SELECT mock_opened(), mock_described(), mock_executed();
+----
+3	15	14
+
+# CONNECT works again outside a transaction.
+statement ok
+CONNECT rs;
+
+query I
+SELECT 'again';
+----
+SELECT 'again';
+
+statement ok
+DISCONNECT;
+
+# ---------------------------------------------------------------------------
+# A handle detached while CONNECT-ed. DuckDB refuses the next statement until DISCONNECT.
+# ---------------------------------------------------------------------------
+statement ok con1
+CONNECT rs;
+
+statement ok
+DETACH rs;
+
+statement error con1
+SELECT 1;
+----
+The connected database has been detached out from under this connection
+
+statement ok con1
+DISCONNECT;
+
+# A session that may have held state, on a handle detached and attached again: the report reaches
+# the CONNECT-ed user in CONNECT's words, once, and the statement typed again runs.
+statement ok
+ATTACH '' AS rs (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+statement ok con1
+CONNECT rs;
+
+statement ok con1
+rows=1 cols=1;
+
+statement ok
+ATTACH OR REPLACE '' AS rs (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+statement error con1
+rows=1 cols=1;
+----
+The connected database has been detached out from under this connection
+
+statement ok con1
+DISCONNECT;
+
+statement ok con1
+CONNECT rs;
+
+statement error con1
+rows=1 cols=1;
+----
+Binder Error: CONNECT: attach handle "rs" was detached or replaced by another DuckDB connection, or an ATTACH under its name was rolled back, and a new handle is attached under the name now. This DuckDB connection's Redshift session on the earlier handle may have held state, which is now lost, so this statement was not run on Redshift. Run it again to start a new, empty Redshift session on the handle attached now.
+
+query II con1
+rows=1 cols=2;
+----
+r0c0	r0c1
+
+statement ok con1
+DISCONNECT;
+
+# ---------------------------------------------------------------------------
+# Only CONNECT <handle>. The string form fails before it attaches anything: DuckDB refuses an
+# empty string, and the handle's ATTACH refuses any attach CONNECT makes.
+# ---------------------------------------------------------------------------
+statement error
+CONNECT '' (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+----
+CONNECT with no target is not yet implemented
+
+statement error
+CONNECT 'rs' (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+----
+Invalid CONNECT: CONNECT to a string or an external resource is not supported for redshift
+
+# DuckDB strips a redshift: prefix and leaves an empty path, so the handle's ATTACH refuses
+# the attach CONNECT makes rather than the path.
+statement error
+CONNECT 'redshift:' (REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+----
+Invalid CONNECT: CONNECT to a string or an external resource is not supported for redshift
+
+# An endpoint path the handle's ATTACH reads is refused too, as an attach CONNECT
+# makes.
+statement error
+CONNECT 'redshift://wg1.012345678901.us-east-1.redshift-serverless.amazonaws.com/dev' (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain);
+----
+Invalid CONNECT: CONNECT to a string or an external resource is not supported for redshift
+
+# DuckDB parses each statement of a query string once the one before it ran, so after CONNECT in its own
+# query string too it sends each as its text, a second CONNECT too, with the space before it.
+query I
+CONNECT rs; CONNECT rs;
+----
+ CONNECT rs;
+
+statement ok
+DISCONNECT;
+
+query I
+CONNECT rs; SELECT 'parsed by DuckDB';
+----
+ SELECT 'parsed by DuckDB';
+
+statement ok
+DISCONNECT;
+
+# A table macro the user names redshift_query does not take the statements: the call CONNECT makes
+# names the extension's function in full.
+statement ok
+CREATE MACRO redshift_query(h, s) AS TABLE SELECT 'not the extension''s' AS c0;
+
+# The macro does take an unqualified call.
+query I
+SELECT * FROM redshift_query('rs', 'rows=1 cols=1');
+----
+not the extension's
+
+statement ok
+CONNECT rs;
+
+query I
+SELECT 'still Redshift';
+----
+SELECT 'still Redshift';
+
+statement ok
+DISCONNECT;
+
+statement ok
+DROP MACRO TABLE redshift_query;
+
+# A handle name that needs quoting.
+statement ok
+ATTACH '' AS "My RS" (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+statement ok
+CONNECT "My RS";
+
+query I
+SELECT 'quoted';
+----
+SELECT 'quoted';
+
+statement error
+error=aborted sqlstates=25P02;
+----
+attach handle "My RS" is aborted
+
+statement ok
+DISCONNECT;

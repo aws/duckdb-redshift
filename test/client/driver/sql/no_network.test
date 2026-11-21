@@ -1,0 +1,54 @@
+# name: test/client/driver/sql/no_network.test
+# description: the embedded driver end to end through SQL, with no network (run-e2e.sh)
+# group: [sql]
+
+require-env REDSHIFT_TEST_CLIENT odbc
+
+require-env DUCKDB_REDSHIFT_TEST_E2E no-network
+
+# Only with run-e2e.sh's fake keys and no session token, so a unit tester started by hand on a host with a
+# network cannot connect with the caller's own credentials (CREDENTIAL_PROVIDER aws_default_chain, with no PROFILE,
+# takes the keys from the environment first).
+require-env AWS_ACCESS_KEY_ID test-not-a-key
+
+require-env AWS_SECRET_ACCESS_KEY test-not-a-secret
+
+require-env-not AWS_SESSION_TOKEN
+
+require redshift
+
+# The driver loads and fails the connect itself: run-e2e.sh aims it at closed ports on the host, which
+# refuse it. No category names that failure, so the message adds the driver's own reason, quoted, as its own
+# sentence: the root cause a user needs when the target is reachable but the connect still fails.
+statement error
+ATTACH '' AS rs (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'analytics', ACCOUNT_ID '012345678901')
+----
+<REGEX>:.*IO Error: Cannot attach rs: Could not connect to Redshift at 127\.0\.0\.1 \(region us-east-1, workgroup [^)]+\): the connection attempt failed\. The driver reported "[^"\n]+"\..*
+
+# A failed connect leaves no handle: the same ATTACH connects again and fails the same way, with the
+# driver already loaded.
+statement error
+ATTACH '' AS rs (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'analytics', ACCOUNT_ID '012345678901')
+----
+<REGEX>:.*IO Error: Cannot attach rs: Could not connect to Redshift at 127\.0\.0\.1 \(region us-east-1, workgroup [^)]+\): the connection attempt failed\. The driver reported "[^"\n]+"\..*
+
+# A cluster endpoint path sends Host, Port and ClusterId together, and the driver accepts that key set:
+# it loads and fails the connect itself, and the failure is a connection failure, not a configuration
+# refusal. The test host stands in for the cluster's host, and a loopback name is no provisioned host to
+# the driver, so it first tries its custom-domain lookup at the test URL and then falls back to ClusterId.
+
+statement error
+ATTACH 'redshift://warehouse-1.abc123xyz.us-east-1.redshift.amazonaws.com:5440/dev' AS rs_cluster (TYPE redshift, CREDENTIAL_PROVIDER aws_default_chain)
+----
+<REGEX>:.*IO Error: Cannot attach rs_cluster: Could not connect to Redshift at warehouse-1 \(region us-east-1, cluster warehouse-1, endpoint label abc123xyz, port 5440, database dev\): the connection attempt failed\. The driver reported "[^"\n]+"\..*
+
+# A workgroup URI's port goes to the driver as Port with the workgroup's key set, and the driver takes that
+# key set: it loads and fails the connect itself, not as a configuration refusal. It fails at the test
+# endpoint URL, where a Serverless IAM connect first asks for its credentials, before any connect to Host
+# and Port, so this does not show that the driver uses the port: connection_string_test.cpp and
+# driver_source_test.cpp pin the Port value.
+
+statement error
+ATTACH 'redshift://analytics.012345678901.us-east-1.redshift-serverless.amazonaws.com:5440/dev' AS rs_workgroup_port (TYPE redshift, CREDENTIAL_PROVIDER aws_default_chain)
+----
+<REGEX>:.*IO Error: Cannot attach rs_workgroup_port: Could not connect to Redshift at 127\.0\.0\.1 \(region us-east-1, workgroup analytics, account 012345678901, port 5440, database dev\): the connection attempt failed\. The driver reported "[^"\n]+"\..*

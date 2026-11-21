@@ -1,0 +1,7 @@
+# Libraries the driver needs from the host that are not part of the base system. When the platform
+# loader fails because one is missing, the loader returns MISSING_PREREQUISITE naming it and tries
+# no other directory. One library per line: the operating system it applies to (linux, macos or
+# windows) and its file name. A Windows DLL's minimum file version is in the lock, its one home.
+linux  libkeyutils.so.1
+windows  VCRUNTIME140.dll
+windows  VCRUNTIME140_1.dll

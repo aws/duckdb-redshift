@@ -1,0 +1,23 @@
+# name: test/client/driver/sql/refused_variable.test
+# description: a set load-phase variable (KRB5_CONFIG) stops the connection before the driver loads (run-e2e.sh)
+# group: [sql]
+
+require-env REDSHIFT_TEST_CLIENT odbc
+
+require-env DUCKDB_REDSHIFT_TEST_E2E refused-variable
+
+# Only with run-e2e.sh's fake keys and no session token, so a unit tester started by hand on a host with a
+# network cannot connect with the caller's own credentials (CREDENTIAL_PROVIDER aws_default_chain, with no PROFILE,
+# takes the keys from the environment first).
+require-env AWS_ACCESS_KEY_ID test-not-a-key
+
+require-env AWS_SECRET_ACCESS_KEY test-not-a-secret
+
+require-env-not AWS_SESSION_TOKEN
+
+require redshift
+
+statement error
+ATTACH '' AS rs (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'analytics', ACCOUNT_ID '012345678901')
+----
+IO Error: Cannot attach rs: the Redshift driver could not be loaded: KRB5_CONFIG is set; the Redshift driver would read it, and it can change the driver's connection or security settings. Unset it to connect.

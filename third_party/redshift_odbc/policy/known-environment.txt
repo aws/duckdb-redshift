@@ -1,0 +1,133 @@
+# Environment variables the driver reads that the extension leaves to it. One name per line:
+#
+#   NAME  Keyword          overridden: the connection string the ODBC client builds always sets
+#                          Keyword, and the ODBC client refuses to connect when it lacks a keyword
+#                          listed here
+#   NAME  -  reason        left live on purpose, for the reason given (the user's AWS credential
+#                          chain and its configuration files, AWS SDK client behaviour, proxies and
+#                          name resolution, library tuning); never compiled into the extension.
+#                          Listed so a change is visible, not because it is overridden.
+#   NAME  -  claim: reason harmless because of what the driver does with it, as the reason
+#                          claims; known_environment_live_test.cpp sets it to a hostile value to
+#                          check the claim live, and a review of the driver's source confirms it.
+#
+# Every name the environment-name rule finds in the driver is in this file, refused-environment.txt
+# or ignored-strings.txt, and so is every name a review of the driver's source found read on the
+# extension's paths, including names outside the scanned prefixes. Every driver update reviews this
+# classification. known_environment_live_test.cpp confirms the keyword rows live, and a name that
+# fails moves to the refused list. It also sets the "claim:" rows; the other - rows are left live on
+# purpose and are not set. Reviewed on every driver update. SSL_CERT_FILE is the ODBC client's first
+# trust source: the ODBC client resolves it and passes the file as both CaFile and TrustStore. A
+# name only some platforms' drivers hold carries "# only in <platform>,...[; reason]", as in
+# ignored-strings.txt: it need not be found on the other platforms, and must not be.
+SSL_CERT_FILE  CaFile
+
+# Options the driver always passes to its client library, on every target: the connection string
+# sets Host and Port for a Serverless workgroup and for a cluster named by its endpoint, and a
+# cluster named by CLUSTER alone gets them from DescribeClusters, so neither is a keyword every
+# target emits.
+PGHOST             -  claim: a Serverless connection and a cluster endpoint set Host, and CLUSTER alone takes its host from DescribeClusters
+PGPORT             -  claim: a Serverless connection and a cluster endpoint set Port, and CLUSTER alone takes its port from DescribeClusters
+
+# Options the connection string always sets.
+PGDATABASE         Database
+PGSSLMODE          SSLMode
+PGAPPNAME          ApplicationName
+PGCONNECT_TIMEOUT  LoginTimeout
+PGCOMPRESSION      Compression
+# The IAM path supplies the user and the database token.
+PGUSER             IAM
+PGPASSWORD         IAM
+PGPASSFILE         -  claim: no password is read: the IAM path supplies the database token
+PGREQUIREPEER      -  claim: applies only to Unix-domain sockets, which the connection never uses
+
+# The AWS default credential chain (the user's own credentials and where the chain finds them),
+# which the extension uses when no profile is named.
+AWS_ACCESS_KEY_ID  -  a source of the AWS default credential chain
+AWS_SECRET_ACCESS_KEY  -  a source of the AWS default credential chain
+AWS_SESSION_TOKEN  -  a source of the AWS default credential chain
+AWS_ACCOUNT_ID  -  a source of the AWS default credential chain
+AWS_PROFILE  -  selects the profile of the credential chain the user chose; same-user environment is trusted
+AWS_DEFAULT_PROFILE  -  selects the profile of the credential chain the user chose; same-user environment is trusted
+AWS_ROLE_ARN  -  a source of the AWS default credential chain
+AWS_ROLE_SESSION_NAME  -  a source of the AWS default credential chain
+AWS_IAM_ROLE_ARN  -  a source of the AWS default credential chain
+AWS_IAM_ROLE_SESSION_NAME  -  a source of the AWS default credential chain
+AWS_WEB_IDENTITY_TOKEN_FILE  -  a source of the AWS default credential chain
+AWS_CONTAINER_AUTHORIZATION_TOKEN  -  a source of the AWS default credential chain
+AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE  -  a source of the AWS default credential chain
+AWS_CONTAINER_CREDENTIALS_FULL_URI  -  a source of the AWS default credential chain
+AWS_CONTAINER_CREDENTIALS_RELATIVE_URI  -  a source of the AWS default credential chain
+AWS_EC2_METADATA_DISABLED  -  a source of the AWS default credential chain
+AWS_EC2_METADATA_SERVICE_ENDPOINT  -  a source of the AWS default credential chain
+AWS_EC2_METADATA_SERVICE_ENDPOINT_MODE  -  a source of the AWS default credential chain
+AWS_EC2_METADATA_V1_DISABLED  -  a source of the AWS default credential chain
+ec2_metadata_v1_disabled  -  a source of the AWS default credential chain
+AWS_METADATA_SERVICE_NUM_ATTEMPTS  -  a source of the AWS default credential chain
+AWS_METADATA_SERVICE_TIMEOUT  -  a source of the AWS default credential chain
+AWS_LOGIN_CACHE_DIRECTORY  -  a source of the AWS default credential chain
+AWS_CONFIG_FILE  -  the user's AWS config file, which configures the credential chain the user chose (a credential_process program, the chain's own STS endpoints) and can turn on client-side monitoring, whose UDP events carry the access key ID and session token to the host the file names; it cannot move the endpoints EndPointUrl sets or change trust
+AWS_SHARED_CREDENTIALS_FILE  -  the user's AWS credentials file, a source of the chain; the chain's profile provider merges it with the config file, so it too can name a credential_process program; it cannot move the endpoints EndPointUrl sets or change trust
+HOME  -  where the chain finds the user's default AWS config and credentials files, which can do what the two rows above say; refusing it would stop nearly every connect
+USERPROFILE  -  Windows: what HOME is above, where the chain finds the user's AWS files (%USERPROFILE%\.aws)
+HOMEDRIVE  -  Windows: with HOMEPATH, the home directory the AWS SDK falls back to when USERPROFILE is unset
+HOMEPATH  -  Windows: with HOMEDRIVE, the home directory the AWS SDK falls back to when USERPROFILE is unset
+
+# AWS SDK client behaviour: region, retries, timeouts, checksums, user agent, environment
+# detection. None sets TLS, trust or the Redshift endpoints, which the connection string names.
+AWS_REGION  -  AWS SDK client behaviour
+AWS_DEFAULT_REGION  -  AWS SDK client behaviour
+AWS_ACCOUNT_ID_ENDPOINT_MODE  -  AWS SDK client behaviour
+AWS_AUTH_SCHEME_PREFERENCE  -  AWS SDK client behaviour
+AWS_DEFAULTS_MODE  -  AWS SDK client behaviour
+AWS_DISABLE_CLOCK_SKEW_CORRECTION  -  AWS SDK client behaviour
+AWS_ENABLE_ENDPOINT_DISCOVERY  -  AWS SDK client behaviour  # only in linux_amd64,linux_arm64,osx_amd64,osx_arm64
+AWS_IGNORE_CONFIGURED_ENDPOINT_URLS  -  AWS SDK client behaviour
+AWS_USE_DUALSTACK_ENDPOINT  -  AWS SDK client behaviour
+AWS_USE_FIPS_ENDPOINT  -  AWS SDK client behaviour
+AWS_MAX_ATTEMPTS  -  AWS SDK client behaviour
+AWS_RETRY_MODE  -  AWS SDK client behaviour
+AWS_NEW_RETRIES_2026  -  AWS SDK client behaviour  # only in linux_amd64,linux_arm64,osx_amd64,osx_arm64
+AWS_REQUEST_CHECKSUM_CALCULATION  -  AWS SDK client behaviour
+AWS_RESPONSE_CHECKSUM_VALIDATION  -  AWS SDK client behaviour
+AWS_SIGV4A_SIGNING_REGION_SET  -  AWS SDK client behaviour
+AWS_SDK_UA_APP_ID  -  AWS SDK client behaviour
+AWS_EXECUTION_ENV  -  AWS SDK client behaviour
+AWS_LAMBDA_FUNCTION_NAME  -  AWS SDK client behaviour
+AWS_CSM_CLIENT_ID  -  AWS SDK client behaviour
+DISABLE_REQUEST_COMPRESSION  -  AWS SDK client behaviour
+REQUEST_MIN_COMPRESSION_SIZE_BYTES  -  AWS SDK client behaviour
+_X_AMZN_TRACE_ID  -  AWS SDK client behaviour
+
+# Proxies: TLS is verified end to end, so a proxy can block a call or see the host it reaches,
+# but cannot read or change the traffic.
+HTTP_PROXY  -  a proxy cannot read or change TLS traffic
+HTTPS_PROXY  -  a proxy cannot read or change TLS traffic
+ALL_PROXY  -  a proxy cannot read or change TLS traffic  # only in linux_amd64,linux_arm64,osx_amd64,osx_arm64
+NO_PROXY  -  a proxy cannot read or change TLS traffic
+http_proxy  -  a proxy cannot read or change TLS traffic
+all_proxy  -  a proxy cannot read or change TLS traffic  # only in linux_amd64,linux_arm64,osx_amd64,osx_arm64
+no_proxy  -  a proxy cannot read or change TLS traffic
+https_proxy  -  a proxy cannot read or change TLS traffic
+
+# Name resolution: TLS verifies the requested host name end to end, so these can block a call but
+# not redirect it unnoticed.
+CARES_HOSTS  -  name resolution cannot change TLS-verified traffic
+HOSTALIASES  -  name resolution cannot change TLS-verified traffic
+LOCALDOMAIN  -  name resolution cannot change TLS-verified traffic
+RES_OPTIONS  -  name resolution cannot change TLS-verified traffic
+
+# Library tuning: CPU feature selection, terminal detection, debug output and SPNEGO token flow.
+# None changes keys, trust, verification or an endpoint.
+OPENSSL_ia32cap  -  library tuning
+OPENSSL_armcap  -  library tuning
+AWSLC_CONSOLE_NO_TTY_DETECT  -  library tuning
+S2N_PRINT_STACKTRACE  -  library tuning
+NEGOEX_NO_OPTIMISTIC_TOKEN  -  library tuning
+
+# Read only by features the connection string never enables.
+NETRC  -  claim: read only when curl's netrc option is on, which the AWS SDK never sets
+TEMP  -  Windows: read at load by GetTempPathA, after TMP, for the default trace file's directory, as TMPDIR is on Linux; no trace file is written with the level off
+TMP  -  Windows: read at load by GetTempPathA, before TEMP, for the default trace file's directory, as TMPDIR is on Linux; no trace file is written with the level off
+TMPDIR  -  claim: names the directory of the driver's default trace file and client-side cursor files, neither written with LogLevel=0 and CscEnable=0
+DISPLAY  -  claim: read only by the browser sign-in plugin, which no target selects

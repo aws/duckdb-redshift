@@ -1,0 +1,99 @@
+# name: test/client/sql/number_text.test
+# description: live: booleans, each integer width's extremes and the float8 constants arrive exactly as text, an oid past INTEGER's range is refused, and a float8 that underflows fails when it runs
+# group: [sql]
+
+require-env REDSHIFT_TEST_CLIENT odbc
+
+# Live only (test/README.md, "Live variables"): it needs REDSHIFT_TEST_LIVE_REGION and a build with
+# the embedded driver.
+require-env REDSHIFT_TEST_LIVE_REGION
+
+# The account-backed workgroup the live tests reach (test/README.md, "Live variables").
+require-env REDSHIFT_TEST_LIVE_WORKGROUP
+
+require-env REDSHIFT_TEST_LIVE_ACCOUNT_ID
+
+require redshift
+
+statement ok
+ATTACH '' AS rs (TYPE redshift, REGION '{REDSHIFT_TEST_LIVE_REGION}', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP '{REDSHIFT_TEST_LIVE_WORKGROUP}', ACCOUNT_ID '{REDSHIFT_TEST_LIVE_ACCOUNT_ID}');
+
+# The driver writes a BOOLEAN as 1 or 0, and each integer as its digits, which the ODBC client parses.
+query TTTTTTTTTTTT
+SELECT t::VARCHAR, f::VARCHAR, s_min::VARCHAR, s_max::VARCHAR, i_min::VARCHAR, i_max::VARCHAR, b_min::VARCHAR, b_max::VARCHAR, typeof(t), typeof(s_min), typeof(i_min), typeof(b_min) FROM redshift_query('rs', 'SELECT true AS t, false AS f, (-32768)::int2 AS s_min, 32767::int2 AS s_max, (-2147483648)::int4 AS i_min, 2147483647::int4 AS i_max, (-9223372036854775808)::int8 AS b_min, 9223372036854775807::int8 AS b_max');
+----
+true	false	-32768	32767	-2147483648	2147483647	-9223372036854775808	9223372036854775807	BOOLEAN	SMALLINT	INTEGER	BIGINT
+
+# The driver describes an oid as INTEGER. Its text keeps its value, which the INTEGER column refuses
+# with the cast hint; cast to BIGINT in the Redshift SQL, it arrives whole.
+statement error
+SELECT * FROM redshift_query('rs', 'SELECT 3000000000::oid AS o');
+----
+value 3000000000 is out of range for INTEGER
+
+query TI
+SELECT typeof(o), o FROM redshift_query('rs', 'SELECT 3000000000::oid::int8 AS o');
+----
+BIGINT	3000000000
+
+# The offline parsing tests' float8 constants arrive exactly. The session prints 17 digits, and
+# DuckDB prints a double's shortest text that reads back as it, sign included, so equal text is an
+# equal value; a NaN's payload is not text, and the offline tests pin it. The server refuses a
+# denormal, as a literal or a result (22003), so the smallest normal double stands in for it.
+query TTTTTTT
+SELECT point_three::VARCHAR, dbl_max::VARCHAR, min_normal::VARCHAR, neg_zero::VARCHAR, not_a_number::VARCHAR, pos_inf::VARCHAR, neg_inf::VARCHAR FROM redshift_query('rs', 'SELECT 0.30000000000000004::float8 AS point_three, 1.7976931348623157e308::float8 AS dbl_max, 2.2250738585072014e-308::float8 AS min_normal, ''-0''::float8 AS neg_zero, ''NaN''::float8 AS not_a_number, ''Infinity''::float8 AS pos_inf, ''-Infinity''::float8 AS neg_inf');
+----
+0.30000000000000004	1.7976931348623157e+308	2.2250738585072014e-308	-0.0	nan	inf	-inf
+
+# The session the underflow statements run on, by its process id.
+statement ok
+CREATE TABLE underflow_session AS SELECT pid FROM redshift_query('rs', 'SELECT pg_backend_pid() AS pid');
+
+# A constant whose value underflows is described with no columns, so it binds as a statement without
+# rows; its run must still raise the server's 22003 and publish no row, alone or with another column
+# beside it. Computed from a subquery, the same value is described as its DOUBLE column and must fail
+# the same way.
+query TT
+SELECT column_name, column_type FROM (DESCRIBE SELECT * FROM redshift_query('rs', 'SELECT 2.2250738585072014e-308::float8 / 1e10::float8 AS u'));
+----
+rowcount	BIGINT
+
+statement error
+SELECT * FROM redshift_query('rs', 'SELECT 2.2250738585072014e-308::float8 / 1e10::float8 AS u');
+----
+<REGEX>:(?s)Executor Error: Redshift could not run the statement: ERROR:  type "double precision" value out of range: underflow\nSQLSTATE: 22003\n.*
+
+query TT
+SELECT column_name, column_type FROM (DESCRIBE SELECT * FROM redshift_query('rs', 'SELECT 1 AS a, 2.2250738585072014e-308::float8 / 1e10::float8 AS u'));
+----
+rowcount	BIGINT
+
+statement error
+SELECT * FROM redshift_query('rs', 'SELECT 1 AS a, 2.2250738585072014e-308::float8 / 1e10::float8 AS u');
+----
+<REGEX>:(?s)Executor Error: Redshift could not run the statement: ERROR:  type "double precision" value out of range: underflow\nSQLSTATE: 22003\n.*
+
+query TT
+SELECT column_name, column_type FROM (DESCRIBE SELECT * FROM redshift_query('rs', 'SELECT x / 1e10::float8 AS u FROM (SELECT 2.2250738585072014e-308::float8 AS x) AS t'));
+----
+u	DOUBLE
+
+statement error
+SELECT * FROM redshift_query('rs', 'SELECT x / 1e10::float8 AS u FROM (SELECT 2.2250738585072014e-308::float8 AS x) AS t');
+----
+<REGEX>:(?s)Executor Error: Redshift could not run the statement: ERROR:  type "double precision" value out of range: underflow\nSQLSTATE: 22003\n.*
+
+# A statement failure, not a lost connection: the session the failures ran on, by its process id,
+# answers the next statement. Any answer alone would pass on a new session too.
+query I
+SELECT count(*) FROM underflow_session, redshift_query('rs', 'SELECT pg_backend_pid() AS pid') later
+WHERE later.pid = underflow_session.pid;
+----
+1
+
+# The control: a new DuckDB connection's session has another process id.
+query I con2
+SELECT count(*) FROM underflow_session, redshift_query('rs', 'SELECT pg_backend_pid() AS pid') later
+WHERE later.pid = underflow_session.pid;
+----
+0

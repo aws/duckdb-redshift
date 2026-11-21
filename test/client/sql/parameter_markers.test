@@ -1,0 +1,80 @@
+# name: test/client/sql/parameter_markers.test
+# description: live: params bind to $1..$N by number, and the driver rewrites ? itself
+# group: [sql]
+
+require-env REDSHIFT_TEST_CLIENT odbc
+
+# Live only (test/README.md, "Live variables"): it needs REDSHIFT_TEST_LIVE_REGION and a build with
+# the embedded driver.
+require-env REDSHIFT_TEST_LIVE_REGION
+
+# The account-backed workgroup the live tests reach (test/README.md, "Live variables").
+require-env REDSHIFT_TEST_LIVE_WORKGROUP
+
+require-env REDSHIFT_TEST_LIVE_ACCOUNT_ID
+
+require redshift
+
+statement ok
+ATTACH '' AS rs (TYPE redshift, REGION '{REDSHIFT_TEST_LIVE_REGION}', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP '{REDSHIFT_TEST_LIVE_WORKGROUP}', ACCOUNT_ID '{REDSHIFT_TEST_LIVE_ACCOUNT_ID}');
+
+# The form the shared header promises: the server types the bound text by the cast.
+query TI
+SELECT typeof(c), c FROM redshift_query('rs', 'SELECT $1::int + 1', params := ['41']) AS t(c);
+----
+INTEGER	42
+
+# By number, not by place in the text, which would give 1 - 43.
+query I
+SELECT c FROM redshift_query('rs', 'SELECT $2::int - $1::int', params := ['1', '43']) AS t(c);
+----
+42
+
+# One value per marker number, however often the text repeats it.
+query I
+SELECT c FROM redshift_query('rs', 'SELECT $1::int + $1::int', params := ['21']) AS t(c);
+----
+42
+
+# The driver reports the server's marker count before anything runs, so a missing value is refused.
+statement error
+SELECT * FROM redshift_query('rs', 'SELECT $1::int + 1');
+----
+the statement has 1 parameter marker(s) but 0 parameter(s) were given
+
+# The driver also takes ?, which it rewrites to $1, $2 ... in order before the server sees the text.
+query I
+SELECT c FROM redshift_query('rs', 'SELECT ?::int - ?::int', params := ['43', '1']) AS t(c);
+----
+42
+
+# It numbers each ? from 1 whatever $n the text holds, so this runs as $1 * 10 + $1: the forms do
+# not mix.
+query I
+SELECT c FROM redshift_query('rs', 'SELECT $1::int * 10 + ?::int', params := ['4']) AS t(c);
+----
+44
+
+# A ? in single quotes stays text, but the driver's scan does not know dollar quotes, and any quote
+# character toggles its state, so a ? after an apostrophe in a quoted name is rewritten too. Pinned
+# so a driver that fixes this fails here and the caveat is revisited.
+query T
+SELECT c FROM redshift_query('rs', 'SELECT ''colou?r''::varchar') AS t(c);
+----
+colou?r
+
+query T
+SELECT c FROM redshift_query('rs', 'SELECT $$colou?r$$') AS t(c);
+----
+colou$1r
+
+query T
+SELECT b FROM redshift_query('rs', 'SELECT 1 AS "it''s", ''colou?r''::varchar AS b') AS t(a, b);
+----
+colou$1r
+
+# So a literal ? is safe only when the text holds no ? at all, as chr(63) spells it.
+query T
+SELECT c FROM redshift_query('rs', 'SELECT ''colou'' || chr(63) || ''r''') AS t(c);
+----
+colou?r

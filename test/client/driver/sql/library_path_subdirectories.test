@@ -1,0 +1,31 @@
+# name: test/client/driver/sql/library_path_subdirectories.test
+# description: files under the names of the libraries the driver needs, in the subdirectories the platform loader tries below an LD_LIBRARY_PATH element, change nothing (run-e2e.sh)
+# group: [sql]
+
+require-env REDSHIFT_TEST_CLIENT odbc
+
+require-env DUCKDB_REDSHIFT_TEST_E2E library-path-subdirectories
+
+# Only with run-e2e.sh's fake keys and no session token, so a unit tester started by hand on a host with a
+# network cannot connect with the caller's own credentials (CREDENTIAL_PROVIDER aws_default_chain, with no PROFILE,
+# takes the keys from the environment first).
+require-env AWS_ACCESS_KEY_ID test-not-a-key
+
+require-env AWS_SECRET_ACCESS_KEY test-not-a-secret
+
+require-env-not AWS_SESSION_TOKEN
+
+require redshift
+
+# run-e2e.sh starts this with LD_LIBRARY_PATH on a directory whose subdirectories, which the platform loader
+# tries below the element and its search list does not report (glibc-hwcaps levels, tls, the platform and
+# hardware-capability directories, `atomics` on aarch64), every user can write and hold files which are no
+# libraries, under the names of the driver's needed libraries. The loader loads each first from the path the
+# library cache, or else a system directory, gives, so the planted files are never
+# opened.
+# The driver loads and fails the connect itself: run-e2e.sh aims it at closed ports on the host,
+# which refuse it.
+statement error
+ATTACH '' AS rs (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'analytics', ACCOUNT_ID '012345678901')
+----
+<REGEX>:.*IO Error: Cannot attach rs: Could not connect to Redshift at 127\.0\.0\.1 \(region us-east-1, workgroup [^)]+\): the connection attempt failed\..*

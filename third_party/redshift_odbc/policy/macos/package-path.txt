@@ -1,0 +1,6 @@
+# The driver's path in the macOS package, which verification checks before any download, takes the
+# library from and prints into the lock rows: the component's Payload in the package's table of
+# contents, then the file's path in that payload, as pkgutil --expand-full lays it out. The
+# PackageInfo beside that Payload must name the product and the version (step 3). It must pass the
+# lock checker's path grammar. A changed path is a reviewed policy edit. One path.
+./AmazonRedshiftODBC.pkg/Payload/librsodbc64.dylib

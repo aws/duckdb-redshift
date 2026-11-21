@@ -1,0 +1,558 @@
+# name: test/mock/reattach.test
+# description: a bystander's next statement after another DuckDB connection detaches its handle, in each case of name and session state
+# group: [mock]
+
+require-env REDSHIFT_TEST_CLIENT mock
+
+require redshift
+
+# Opens, Describes and executions are counted from the lines the mock logs. The mock's
+# SessionHoldsState() follows the client's latch: false until a connection's first execution, true from
+# then on. So a bystander that ran a statement held possible state, and one that only bound (DESCRIBE)
+# held none. Each ATTACH below, on the default connection, opens that connection's session too, so the
+# open counts include one per ATTACH.
+statement ok
+CALL enable_logging(level = 'debug');
+
+statement ok
+CREATE MACRO mock_opened() AS (SELECT count(*) FROM duckdb_logs WHERE message LIKE 'redshift mock: opened a connection to %');
+
+statement ok
+CREATE MACRO mock_described() AS (SELECT count(*) FROM duckdb_logs WHERE message LIKE 'redshift mock: described a statement on %');
+
+statement ok
+CREATE MACRO mock_executed() AS (SELECT count(*) FROM duckdb_logs WHERE message LIKE 'redshift mock: executed a statement on %');
+
+# ---------------------------------------------------------------------------
+# Name gone, session may have held state: the unresolved-handle error says the state may be lost,
+# once. The next statement gets the plain error.
+# ---------------------------------------------------------------------------
+statement ok
+ATTACH '' AS rs (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+statement ok con1
+SELECT * FROM redshift_query('rs', 'rows=1 cols=1');
+
+statement ok
+DETACH rs;
+
+statement error con1
+SELECT * FROM redshift_query('rs', 'rows=1 cols=1');
+----
+<REGEX>:Binder Error: redshift_query: no attached database is named "rs"\. Attach a Redshift handle first with ATTACH '' AS rs \(TYPE redshift, \.\.\.\)\. Another DuckDB connection detached or replaced the Redshift handle that had this name, or an ATTACH under this name was rolled back, while this DuckDB connection had a Redshift session on it, and that session may have held state, which is now lost\.(\n\nLINE 1:.*)?
+
+statement error con1
+SELECT * FROM redshift_query('rs', 'rows=1 cols=1');
+----
+<REGEX>:Binder Error: redshift_query: no attached database is named "rs"\. Attach a Redshift handle first with ATTACH '' AS rs \(TYPE redshift, \.\.\.\)(\n\nLINE 1:.*)?
+
+query III
+SELECT mock_opened(), mock_described(), mock_executed();
+----
+2	1	1
+
+# ---------------------------------------------------------------------------
+# Name gone, session held no state: the plain error, from the first statement.
+# ---------------------------------------------------------------------------
+statement ok
+ATTACH '' AS rs (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+statement ok con1
+DESCRIBE SELECT * FROM redshift_query('rs', 'rows=1 cols=1');
+
+statement ok
+DETACH rs;
+
+statement error con1
+SELECT * FROM redshift_query('rs', 'rows=1 cols=1');
+----
+<REGEX>:Binder Error: redshift_query: no attached database is named "rs"\. Attach a Redshift handle first with ATTACH '' AS rs \(TYPE redshift, \.\.\.\)(\n\nLINE 1:.*)?
+
+query III
+SELECT mock_opened(), mock_described(), mock_executed();
+----
+4	2	1
+
+# ---------------------------------------------------------------------------
+# Name attached again, session may have held state: after a row-returning execution, the first
+# statement on the new handle is refused, before it opens or describes anything. The next one opens a
+# fresh session on the new handle and runs.
+# ---------------------------------------------------------------------------
+statement ok
+ATTACH '' AS rs (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+query I con1
+SELECT c0 FROM redshift_query('rs', 'rows=1 cols=1');
+----
+r0c0
+
+statement ok
+DETACH rs;
+
+statement ok
+ATTACH '' AS rs (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+statement error con1
+SELECT * FROM redshift_query('rs', 'rows=1 cols=1');
+----
+<REGEX>:Binder Error: redshift_query: attach handle "rs" was detached or replaced by another DuckDB connection, or an ATTACH under its name was rolled back, and a new handle is attached under the name now\. This DuckDB connection's Redshift session on the earlier handle may have held state, which is now lost, so this statement was not run on Redshift\. Run it again to start a new, empty Redshift session on the handle attached now\.(\n\nLINE 1:.*)?
+
+query III
+SELECT mock_opened(), mock_described(), mock_executed();
+----
+7	3	2
+
+query I con1
+SELECT c0 FROM redshift_query('rs', 'rows=1 cols=1');
+----
+r0c0
+
+query III
+SELECT mock_opened(), mock_described(), mock_executed();
+----
+8	4	3
+
+# ---------------------------------------------------------------------------
+# Name attached again, session held no state: a bystander that only bound proceeds on the new
+# handle at once, silently.
+# ---------------------------------------------------------------------------
+statement ok con1
+DETACH rs;
+
+statement ok
+ATTACH '' AS rs (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+statement ok con2
+DESCRIBE SELECT * FROM redshift_query('rs', 'rows=1 cols=1');
+
+statement ok
+DETACH rs;
+
+statement ok
+ATTACH '' AS rs (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+query I con2
+SELECT c0 FROM redshift_query('rs', 'rows=1 cols=1');
+----
+r0c0
+
+# ---------------------------------------------------------------------------
+# ATTACH OR REPLACE on another DuckDB connection retires the handle as DETACH does.
+# ---------------------------------------------------------------------------
+statement ok
+ATTACH OR REPLACE '' AS rs (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+statement error con2
+SELECT * FROM redshift_query('rs', 'rows=1 cols=1');
+----
+a new handle is attached under the name now
+
+statement ok con2
+SELECT * FROM redshift_query('rs', 'rows=1 cols=1');
+
+# ---------------------------------------------------------------------------
+# The DuckDB connection that detaches ends its own session, so it gets no report, whatever the
+# session held, and neither does one that never used the handle.
+# ---------------------------------------------------------------------------
+statement ok con3
+SELECT * FROM redshift_query('rs', 'rows=1 cols=1');
+
+statement ok con3
+DETACH rs;
+
+statement ok con3
+ATTACH '' AS rs (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+statement ok con3
+SELECT * FROM redshift_query('rs', 'rows=1 cols=1');
+
+statement ok con4
+SELECT * FROM redshift_query('rs', 'rows=1 cols=1');
+
+# con2, a bystander to con3's DETACH, still gets its report.
+statement error con2
+SELECT * FROM redshift_query('rs', 'rows=1 cols=1');
+----
+a new handle is attached under the name now
+
+# ---------------------------------------------------------------------------
+# A name that now means a DuckDB database: its error says the state may be lost too. The report
+# goes with the name, whatever case the next statement writes it in, and with no other name.
+# ---------------------------------------------------------------------------
+statement ok
+ATTACH '' AS rs_other (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+statement ok con1
+SELECT * FROM redshift_query('rs', 'rows=1 cols=1');
+
+statement ok con1
+SELECT * FROM redshift_query('rs_other', 'rows=1 cols=1');
+
+statement ok
+DETACH rs;
+
+statement ok
+ATTACH ':memory:' AS rs;
+
+statement ok con1
+SELECT * FROM redshift_query('rs_other', 'rows=1 cols=1');
+
+statement error con1
+SELECT * FROM redshift_query('RS', 'rows=1 cols=1');
+----
+<REGEX>:Binder Error: redshift_query: "RS" is a duckdb database, not a Redshift handle\. Attach one with ATTACH '' AS <name> \(TYPE redshift, \.\.\.\)\. Another DuckDB connection detached or replaced the Redshift handle that had this name, or an ATTACH under this name was rolled back, while this DuckDB connection had a Redshift session on it, and that session may have held state, which is now lost\.(\n\nLINE 1:.*)?
+
+statement ok
+DETACH rs;
+
+# ---------------------------------------------------------------------------
+# A handle renamed before it is detached: the report goes with the name it had when it was detached.
+# ---------------------------------------------------------------------------
+statement ok
+ATTACH '' AS rs (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+statement ok con1
+SELECT * FROM redshift_query('rs', 'rows=1 cols=1');
+
+statement ok
+ALTER DATABASE rs SET ALIAS TO rs_renamed;
+
+statement ok
+DETACH rs_renamed;
+
+statement error con1
+SELECT * FROM redshift_query('rs', 'rows=1 cols=1');
+----
+<REGEX>:Binder Error: redshift_query: no attached database is named "rs"\. Attach a Redshift handle first with ATTACH '' AS rs \(TYPE redshift, \.\.\.\)(\n\nLINE 1:.*)?
+
+statement error con1
+SELECT * FROM redshift_query('rs_renamed', 'rows=1 cols=1');
+----
+that session may have held state, which is now lost.
+
+# ---------------------------------------------------------------------------
+# ATTACH inside a transaction that rolls back: DuckDB takes the handle away without OnDetach. A
+# bystander whose session may have held state is told, as after a DETACH. The DuckDB connection whose
+# transaction attached the handle has no session on it to lose: the gate refuses redshift_query inside
+# that transaction, as, with the option on, does the refusal of a
+# handle the transaction attached, and after the rollback the name is gone.
+# ---------------------------------------------------------------------------
+statement ok con5
+BEGIN;
+
+statement ok con5
+ATTACH '' AS rs_tx (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+statement error con5
+SELECT * FROM redshift_query('rs_tx', 'rows=1 cols=1');
+----
+Binder Error: redshift_query cannot run while a DuckDB transaction is open
+
+statement ok con6
+SELECT * FROM redshift_query('rs_tx', 'rows=1 cols=1');
+
+statement ok con5
+ROLLBACK;
+
+statement error con6
+SELECT * FROM redshift_query('rs_tx', 'rows=1 cols=1');
+----
+that session may have held state, which is now lost.
+
+statement error con5
+SELECT * FROM redshift_query('rs_tx', 'rows=1 cols=1');
+----
+<REGEX>:Binder Error: redshift_query: no attached database is named "rs_tx"\. Attach a Redshift handle first with ATTACH '' AS rs_tx \(TYPE redshift, \.\.\.\)(\n\nLINE 1:.*)?
+
+# The same when another transaction still holds the catalog through the rollback, so the rollback's
+# own hook retires the handle, not the catalog's destruction.
+statement ok con5
+BEGIN;
+
+statement ok con5
+ATTACH '' AS rs_tx (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+statement error con5
+SELECT * FROM redshift_query('rs_tx', 'rows=1 cols=1');
+----
+Binder Error: redshift_query cannot run while a DuckDB transaction is open
+
+statement ok con6
+SELECT * FROM redshift_query('rs_tx', 'rows=1 cols=1');
+
+statement ok con7
+BEGIN;
+
+statement error con7
+SELECT * FROM rs_tx.some_table;
+----
+cannot be browsed as a catalog
+
+statement ok con5
+ROLLBACK;
+
+statement error con6
+SELECT * FROM redshift_query('rs_tx', 'rows=1 cols=1');
+----
+that session may have held state, which is now lost.
+
+statement error con5
+SELECT * FROM redshift_query('rs_tx', 'rows=1 cols=1');
+----
+<REGEX>:Binder Error: redshift_query: no attached database is named "rs_tx"\. Attach a Redshift handle first with ATTACH '' AS rs_tx \(TYPE redshift, \.\.\.\)(\n\nLINE 1:.*)?
+
+statement ok con7
+ROLLBACK;
+
+# ---------------------------------------------------------------------------
+# Prepared statements. One bound at PREPARE fails at execution and leaves
+# the report for the next statement bound on the name. One DuckDB binds again at each EXECUTE, as it
+# does a call with a parameter, is that statement: it is refused once, and then runs.
+# ---------------------------------------------------------------------------
+statement ok
+ATTACH OR REPLACE '' AS rs (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+statement ok con5
+PREPARE bound_once AS SELECT c0 FROM redshift_query('rs', 'rows=1 cols=1');
+
+statement ok con5
+PREPARE bound_each AS SELECT c0 FROM redshift_query('rs', 'SELECT $1', params := [?]);
+
+query I con5
+EXECUTE bound_each('a');
+----
+SELECT $1|$1=a
+
+statement ok
+DETACH rs;
+
+statement ok
+ATTACH '' AS rs (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+statement error con5
+EXECUTE bound_once;
+----
+was detached or replaced, or an ATTACH under its name was rolled back, after this statement was bound, and another handle has the name now
+
+statement error con5
+EXECUTE bound_each('b');
+----
+a new handle is attached under the name now
+
+query I con5
+EXECUTE bound_each('c');
+----
+SELECT $1|$1=c
+
+# ---------------------------------------------------------------------------
+# Two handles under one name, each detached while this DuckDB connection's session on it may have
+# held state, before the connection used the name again: it is told once, not twice.
+# ---------------------------------------------------------------------------
+statement ok
+ATTACH '' AS rs_next (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+statement ok con6
+SELECT * FROM redshift_query('rs', 'rows=1 cols=1');
+
+statement ok con6
+SELECT * FROM redshift_query('rs_next', 'rows=1 cols=1');
+
+statement ok
+DETACH rs;
+
+statement ok
+ALTER DATABASE rs_next SET ALIAS TO rs;
+
+statement ok
+DETACH rs;
+
+statement error con6
+SELECT * FROM redshift_query('rs', 'rows=1 cols=1');
+----
+that session may have held state, which is now lost.
+
+statement error con6
+SELECT * FROM redshift_query('rs', 'rows=1 cols=1');
+----
+<REGEX>:Binder Error: redshift_query: no attached database is named "rs"\. Attach a Redshift handle first with ATTACH '' AS rs \(TYPE redshift, \.\.\.\)(\n\nLINE 1:.*)?
+
+# ---------------------------------------------------------------------------
+# ATTACH OR REPLACE inside a transaction that rolls back, over a committed handle. The replacement
+# retires the earlier handle at once, and the rollback takes the replacement away, so the name is
+# gone, and a bystander on either handle is told.
+# ---------------------------------------------------------------------------
+statement ok
+ATTACH '' AS rs_r (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+statement ok con1
+SELECT * FROM redshift_query('rs_r', 'rows=1 cols=1');
+
+statement ok con5
+BEGIN;
+
+statement ok con5
+ATTACH OR REPLACE '' AS rs_r (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+statement ok con6
+SELECT * FROM redshift_query('rs_r', 'rows=1 cols=1');
+
+statement ok con5
+ROLLBACK;
+
+statement error con1
+SELECT * FROM redshift_query('rs_r', 'rows=1 cols=1');
+----
+that session may have held state, which is now lost.
+
+statement error con6
+SELECT * FROM redshift_query('rs_r', 'rows=1 cols=1');
+----
+that session may have held state, which is now lost.
+
+# ---------------------------------------------------------------------------
+# DuckDB undoes a rolled-back ATTACH only while its name still refers to that handle, so it leaves a
+# newer handle another DuckDB connection attached under the name meanwhile, and that handle's sessions.
+# ---------------------------------------------------------------------------
+statement ok con5
+BEGIN;
+
+statement ok con5
+ATTACH '' AS rs_y (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+statement ok con6
+ATTACH OR REPLACE '' AS rs_y (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+statement ok con7
+SELECT * FROM redshift_query('rs_y', 'rows=1 cols=1');
+
+statement ok con5
+ROLLBACK;
+
+query I
+SELECT count(*) FROM duckdb_databases() WHERE database_name = 'rs_y';
+----
+1
+
+statement ok con7
+SELECT * FROM redshift_query('rs_y', 'rows=1 cols=1');
+
+statement ok
+DETACH rs_y;
+
+# ---------------------------------------------------------------------------
+# A rollback retires only a handle DuckDB no longer lists. DuckDB lists a new handle before it adds it
+# to the transaction, which refuses a name the transaction already used for another database, so that
+# ATTACH fails with the handle still listed, and nothing undoes it. It stays usable.
+# ---------------------------------------------------------------------------
+statement ok
+ATTACH ':memory:' AS rs_used;
+
+statement ok
+CREATE TABLE rs_used.t AS SELECT 1 AS a;
+
+statement ok con8
+BEGIN;
+
+statement ok con8
+SELECT a FROM rs_used.t;
+
+statement ok
+DETACH rs_used;
+
+statement error con8
+ATTACH '' AS rs_used (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+----
+was already used by a different database in this transaction
+
+statement ok con8
+ROLLBACK;
+
+query I
+SELECT count(*) FROM duckdb_databases() WHERE database_name = 'rs_used';
+----
+1
+
+statement ok
+SELECT * FROM redshift_query('rs_used', 'rows=1 cols=1');
+
+# A COMMIT that fails runs the rollback hook too. DuckDB commits each database's part in the reverse
+# of the order the transaction first used them, and rolls back the rest after the first failure. Here
+# the ATTACH comes first, so the key conflict fails before it commits, DuckDB undoes it, and the name
+# is gone.
+statement ok
+CREATE TABLE pk_t (k INTEGER PRIMARY KEY);
+
+statement ok con8
+BEGIN;
+
+statement ok con8
+ATTACH '' AS rs_commit (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+statement ok con8
+INSERT INTO pk_t VALUES (1);
+
+statement ok
+INSERT INTO pk_t VALUES (1);
+
+statement error con8
+COMMIT;
+----
+Failed to commit: PRIMARY KEY or UNIQUE constraint violation
+
+statement error
+SELECT * FROM redshift_query('rs_commit', 'rows=1 cols=1');
+----
+<REGEX>:Binder Error: redshift_query: no attached database is named "rs_commit"\. Attach a Redshift handle first with ATTACH '' AS rs_commit \(TYPE redshift, \.\.\.\)(\n\nLINE 1:.*)?
+
+# The other order: the ATTACH comes after the INSERT, so its part commits first, and stays committed
+# when the INSERT's part then fails. The rollback hook runs all the same, and the handle, still listed,
+# stays usable.
+statement ok con8
+BEGIN;
+
+statement ok con8
+INSERT INTO pk_t VALUES (2);
+
+statement ok con8
+ATTACH '' AS rs_commit2 (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+statement ok
+INSERT INTO pk_t VALUES (2);
+
+statement error con8
+COMMIT;
+----
+Failed to commit: PRIMARY KEY or UNIQUE constraint violation
+
+query I
+SELECT count(*) FROM duckdb_databases() WHERE database_name = 'rs_commit2';
+----
+1
+
+statement ok
+SELECT * FROM redshift_query('rs_commit2', 'rows=1 cols=1');
+
+# ---------------------------------------------------------------------------
+# A rollback leaves a committed handle that DuckDB still lists alone: the same DuckDB connection's
+# next transaction that rolls back does not take it away.
+# ---------------------------------------------------------------------------
+statement ok con8
+BEGIN;
+
+statement ok con8
+ATTACH '' AS rs_kept (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+statement ok con8
+COMMIT;
+
+statement ok con8
+BEGIN;
+
+statement ok con8
+SELECT 1;
+
+statement ok con8
+ROLLBACK;
+
+statement ok
+SELECT * FROM redshift_query('rs_kept', 'rows=1 cols=1');

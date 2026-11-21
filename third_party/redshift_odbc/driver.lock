@@ -1,0 +1,74 @@
+# The Amazon Redshift ODBC driver release the extension embeds (README.md, "The lock"). Read only
+# through tools/check-lock.sh, or its reader tools/lib/lock.py where a Windows configure has no
+# bash. Generated from the rows tools/verify-release.sh printed for each platform, with the
+# Windows set's rename rows from tools/lib/rename_pin.py.
+# Changed only by a reviewed change, as a development lock or as an unchanged copy of a generated lock.
+format 2
+version 2.3.1.0
+status release
+linux_amd64  driver  librsodbc64.so  45fb6e644abd50f98b3146bd538231b5a894b453997e5eb2af3c892aa9281e39  https://s3.amazonaws.com/redshift-downloads/drivers/odbc/2.3.1.0/AmazonRedshiftODBC-64-bit-2.3.1.0.x86_64.rpm  d4ef33cbe59df8003cc3649646ae3e8bf5df4249db7c186a0551f2ce2b08d028  ./opt/amazon/redshiftodbcx64/librsodbc64.so
+linux_arm64  driver  librsodbc64.so  5e8b6ca2e5e1cfc47dfb96dd97a90e395ab70d9a9407ac3023d853e5ef0b7eb3  https://s3.amazonaws.com/redshift-downloads/drivers/odbc/2.3.1.0/AmazonRedshiftODBC-64-bit-2.3.1.0.aarch64.rpm  09e44767b14abe8ecd08a208d3592c5252341877b47eb5261e85ff46584830b5  ./opt/amazon/redshiftodbcx64/librsodbc64.so
+osx_amd64  driver  librsodbc64.dylib  ce4351009cafef080bd0414c2751e43291bb65a211c5043cbe70c00d2b68d788  https://s3.amazonaws.com/redshift-downloads/drivers/odbc/2.3.1.0/AmazonRedshiftODBC-64-bit.2.3.1.0.universal.pkg  cc571bca25f0ae55b0a1dac27eb3d1ef1771409394f18c1e8fbf2c63e1bb32d0  ./AmazonRedshiftODBC.pkg/Payload/librsodbc64.dylib
+osx_arm64  driver  librsodbc64.dylib  ce4351009cafef080bd0414c2751e43291bb65a211c5043cbe70c00d2b68d788  https://s3.amazonaws.com/redshift-downloads/drivers/odbc/2.3.1.0/AmazonRedshiftODBC-64-bit.2.3.1.0.universal.pkg  cc571bca25f0ae55b0a1dac27eb3d1ef1771409394f18c1e8fbf2c63e1bb32d0  ./AmazonRedshiftODBC.pkg/Payload/librsodbc64.dylib
+windows_amd64  driver  rsodbc.dll  c5394e222bfa2f4ea73be045a3e60df75110fd2391a3add53e01ec849a951ce8  55f55581a2b7444c3cb3655d5b41d042a526f6d419143a492dfe3a61b5ad09b8  https://s3.amazonaws.com/redshift-downloads/drivers/odbc/2.3.1.0/AmazonRedshiftODBC64-2.3.1.0.msi  e0cc7f727752a3710916ed0fb15eab65129db91e10d1596f8a9b6e8abff9bbae  ./PFiles64/Amazon%20Redshift%20ODBC%20Driver%20x64/Drivers/rsodbc.dll
+windows_amd64  library  comerr64.dll  cf5028c26247bb9a515753409493214fa445913d24d36e7a2f873a5c58b9dcf8  72e08649ef5f3322c484325cc8c80973e0638d2f0a7a43c774c31cc7ab3127ef  https://s3.amazonaws.com/redshift-downloads/drivers/odbc/2.3.1.0/AmazonRedshiftODBC64-2.3.1.0.msi  e0cc7f727752a3710916ed0fb15eab65129db91e10d1596f8a9b6e8abff9bbae  ./PFiles64/Amazon%20Redshift%20ODBC%20Driver%20x64/Drivers/comerr64.dll
+windows_amd64  library  crypto.dll  51c059c0d9e5cf1792f745e44ac5ad26b541178d5f2e92029e107ae0b10f672b  51c059c0d9e5cf1792f745e44ac5ad26b541178d5f2e92029e107ae0b10f672b  https://s3.amazonaws.com/redshift-downloads/drivers/odbc/2.3.1.0/AmazonRedshiftODBC64-2.3.1.0.msi  e0cc7f727752a3710916ed0fb15eab65129db91e10d1596f8a9b6e8abff9bbae  ./PFiles64/Amazon%20Redshift%20ODBC%20Driver%20x64/Drivers/crypto.dll
+windows_amd64  library  gssapi64.dll  c1b2fdef2eefe0d5460b3d7cbe4c3211a4f8d99015e61707ab9a5b8183d9f7c0  c3c3fd92fb3e127dcdcadb104100d162f6f10bef1e68408b8b3e9f3290c43e33  https://s3.amazonaws.com/redshift-downloads/drivers/odbc/2.3.1.0/AmazonRedshiftODBC64-2.3.1.0.msi  e0cc7f727752a3710916ed0fb15eab65129db91e10d1596f8a9b6e8abff9bbae  ./PFiles64/Amazon%20Redshift%20ODBC%20Driver%20x64/Drivers/gssapi64.dll
+windows_amd64  library  k5sprt64.dll  76f8214ca89ae56a92a32f6191f7c652b4fb59baf678ab8a1cf9e42a0a81594a  c85e9d2a37be4e1352e1c9a1c3ca410e9af4575a5364c6ce3a26068e29e00a43  https://s3.amazonaws.com/redshift-downloads/drivers/odbc/2.3.1.0/AmazonRedshiftODBC64-2.3.1.0.msi  e0cc7f727752a3710916ed0fb15eab65129db91e10d1596f8a9b6e8abff9bbae  ./PFiles64/Amazon%20Redshift%20ODBC%20Driver%20x64/Drivers/k5sprt64.dll
+windows_amd64  library  krb5_64.dll  32fd0aabbf2cbcff14c05ad8c01169ffa3a6c16517dfd6c507bd88332d5b8e25  aaf9f208c195840c7568c814893b883f2676b735e066d9b6639a778c3bc86e09  https://s3.amazonaws.com/redshift-downloads/drivers/odbc/2.3.1.0/AmazonRedshiftODBC64-2.3.1.0.msi  e0cc7f727752a3710916ed0fb15eab65129db91e10d1596f8a9b6e8abff9bbae  ./PFiles64/Amazon%20Redshift%20ODBC%20Driver%20x64/Drivers/krb5_64.dll
+windows_amd64  library  msvcr100.dll  1d1a1ae540ba132f998d60d3622f0297b6e86ae399332c3b47462d7c0f560a36  1d1a1ae540ba132f998d60d3622f0297b6e86ae399332c3b47462d7c0f560a36  https://s3.amazonaws.com/redshift-downloads/drivers/odbc/2.3.1.0/AmazonRedshiftODBC64-2.3.1.0.msi  e0cc7f727752a3710916ed0fb15eab65129db91e10d1596f8a9b6e8abff9bbae  ./PFiles64/Amazon%20Redshift%20ODBC%20Driver%20x64/Drivers/msvcr100.dll
+windows_amd64  library  ssl.dll  839e3a69007d8a0d225fe32d910ea0aaeb176eda617dcd80e2a4af9f3f34937c  822194ca6824a40d876093ab1a9ffcf7b53df42a8f37be224cd9df6418a9f6f7  https://s3.amazonaws.com/redshift-downloads/drivers/odbc/2.3.1.0/AmazonRedshiftODBC64-2.3.1.0.msi  e0cc7f727752a3710916ed0fb15eab65129db91e10d1596f8a9b6e8abff9bbae  ./PFiles64/Amazon%20Redshift%20ODBC%20Driver%20x64/Drivers/ssl.dll
+windows_amd64  library  wshelp64.dll  5e9315d525d1e37aea8ff67dc9ba2e926450caae7cd8a58c2798322d3c708852  cbc88a79522db7e658c8b72b72a5272f1a48c79c0b02c9b84972500f2cd74c5e  https://s3.amazonaws.com/redshift-downloads/drivers/odbc/2.3.1.0/AmazonRedshiftODBC64-2.3.1.0.msi  e0cc7f727752a3710916ed0fb15eab65129db91e10d1596f8a9b6e8abff9bbae  ./PFiles64/Amazon%20Redshift%20ODBC%20Driver%20x64/Drivers/wshelp64.dll
+windows_amd64  prerequisite  VCRUNTIME140.dll  14.44.0.0
+windows_amd64  prerequisite  VCRUNTIME140_1.dll  14.44.0.0
+windows_amd64  rename  comerr64.dll  33gywhzra6ikyryk.dll
+windows_amd64  rename  crypto.dll  4tg4wym2bnlc7jod.dll
+windows_amd64  rename  gssapi64.dll  hzrmic4cz6iislvq.dll
+windows_amd64  rename  k5sprt64.dll  ru3nydthqfy42nmb.dll
+windows_amd64  rename  krb5_64.dll  76w37pj.dll
+windows_amd64  rename  msvcr100.dll  3fuqaqtvv36ffhj7.dll
+windows_amd64  rename  rsodbc.dll  ouatmmps4p3zq7nz.dll
+windows_amd64  rename  ssl.dll  yn74vp7ga26dcsuj.dll
+windows_amd64  rename  wshelp64.dll  v2nrff7l.dll
+windows_amd64  patch  comerr64.dll  560  73  9d
+windows_amd64  patch  comerr64.dll  8472  3c35  7338
+windows_amd64  patch  comerr64.dll  8532  b236  8838
+windows_amd64  patch  comerr64.dll  9843  0000000000000000000000000000000000000000000000000000000000000000000000000000000000  7275336e7964746871667934326e6d622e646c6c0033667571617174767633366666686a372e646c6c
+windows_amd64  patch  gssapi64.dll  576  b4  ff
+windows_amd64  patch  gssapi64.dll  266612  682d  b442
+windows_amd64  patch  gssapi64.dll  266632  742d  c042
+windows_amd64  patch  gssapi64.dll  266652  ca2e  d542
+windows_amd64  patch  gssapi64.dll  266692  6030  ea42
+windows_amd64  patch  gssapi64.dll  274100  0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000  3736773337706a2e646c6c003333677977687a726136696b7972796b2e646c6c007275336e7964746871667934326e6d622e646c6c0033667571617174767633366666686a372e646c6c
+windows_amd64  patch  gssapi64.dll  331880  6c656173687736342e646c6c  7c7c7c7c7c7c7c7c7c7c7c7c
+windows_amd64  patch  k5sprt64.dll  568  c2  d7
+windows_amd64  patch  k5sprt64.dll  30780  cc8b  c297
+windows_amd64  patch  k5sprt64.dll  34754  0000000000000000000000000000000000000000  33667571617174767633366666686a372e646c6c
+windows_amd64  patch  krb5_64.dll  576  36  82
+windows_amd64  patch  krb5_64.dll  1090124  d8bb  36fa
+windows_amd64  patch  krb5_64.dll  1090144  42bf  4bfa
+windows_amd64  patch  krb5_64.dll  1090164  50bf  60fa
+windows_amd64  patch  krb5_64.dll  1090264  40c5  6dfa
+windows_amd64  patch  krb5_64.dll  1108022  000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000  3333677977687a726136696b7972796b2e646c6c007275336e7964746871667934326e6d622e646c6c0076326e726666376c2e646c6c0033667571617174767633366666686a372e646c6c
+windows_amd64  patch  krb5_64.dll  1131712  6b7262636336342e646c6c  7c7c7c7c7c7c7c7c7c7c7c
+windows_amd64  patch  krb5_64.dll  1179432  6b7262355f3634  3736773337706a
+windows_amd64  patch  krb5_64.dll  1324168  6c656173687736342e646c6c  7c7c7c7c7c7c7c7c7c7c7c7c
+windows_amd64  patch  rsodbc.dll  648  a6  e5
+windows_amd64  patch  rsodbc.dll  5885152  caec59  a60e5a
+windows_amd64  patch  rsodbc.dll  5885172  eaec59  bb0e5a
+windows_amd64  patch  rsodbc.dll  5885692  6208  d00e
+windows_amd64  patch  rsodbc.dll  5898918  0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000  3474673477796d32626e6c63376a6f642e646c6c00796e373476703767613236646373756a2e646c6c00687a726d696334637a366969736c76712e646c6c
+windows_amd64  patch  ssl.dll  600  a8  bd
+windows_amd64  patch  ssl.dll  521992  d830  a836
+windows_amd64  patch  ssl.dll  535208  0000000000000000000000000000000000000000  3474673477796d32626e6c63376a6f642e646c6c
+windows_amd64  patch  wshelp64.dll  352  c75a01  2aac00
+windows_amd64  patch  wshelp64.dll  576  fd10  1211
+windows_amd64  patch  wshelp64.dll  28368  3a8b  fd90
+windows_amd64  patch  wshelp64.dll  30973  0000000000000000000000000000000000000000  33667571617174767633366666686a372e646c6c
+windows_amd64  patch  wshelp64.dll  31280  575348454c503634  76326e726666376c
+windows_amd64  patch  wshelp64.dll  32480  575348454c503634  76326e726666376c
+windows_amd64  name-seed  fc4a9c6cc943d02153bda608829c71ce68e63935f7311e1a0cb9296424f0d39c
+windows_amd64  set-hash  808e4948eecfe82d8b08cebfd57ba5059deee32b5666d3ecf0855afd9c7a66e7
+*  notice  LICENSE  c8858a5a76440bbca484e134cf7df46385d090dd18b2c58e650f939258802e5b  https://raw.githubusercontent.com/aws/amazon-redshift-odbc-driver/v2.3.1/LICENSE
+*  notice  NOTICE  120d77a203a6708ec9a4c8f19e2167286f35bf05375fc5fb3ff225a6f560e515  https://raw.githubusercontent.com/aws/amazon-redshift-odbc-driver/v2.3.1/NOTICE
+*  notice  THIRD_PARTY_LICENSES  f8c48382044f55b28dca620bc3dbc65d87be8a246679f7d873d22c27b0a87f85  https://raw.githubusercontent.com/aws/amazon-redshift-odbc-driver/v2.3.1/THIRD_PARTY_LICENSES

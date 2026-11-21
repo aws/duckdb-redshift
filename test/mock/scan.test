@@ -1,0 +1,430 @@
+# name: test/mock/scan.test
+# description: redshift_query runs its statement once per scan, on the handle bind described, and returns every row once and in order
+# group: [mock]
+
+require-env REDSHIFT_TEST_CLIENT mock
+
+require redshift
+
+# Opens, closes and executions are counted from the lines the mock logs through DuckDB's logger.
+statement ok
+CALL enable_logging(level = 'debug');
+
+statement ok
+CREATE MACRO mock_opened() AS (SELECT count(*) FROM duckdb_logs WHERE message LIKE 'redshift mock: opened a connection to %');
+
+statement ok
+CREATE MACRO mock_closed() AS (SELECT count(*) FROM duckdb_logs WHERE message LIKE 'redshift mock: closed a connection to %');
+
+statement ok
+CREATE MACRO mock_executed() AS (SELECT count(*) FROM duckdb_logs WHERE message LIKE 'redshift mock: executed a statement on %');
+
+statement ok
+ATTACH '' AS rs (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+# ---------------------------------------------------------------------------
+# Rows come back once each, in the order the result gives them, including an empty result.
+# The mock numbers an int8 column's rows from 0.
+# ---------------------------------------------------------------------------
+query I
+SELECT c0 FROM redshift_query('rs', 'rows=5 types=int8');
+----
+0
+1
+2
+3
+4
+
+query I
+SELECT c0 FROM redshift_query('rs', 'rows=0 types=int8');
+----
+
+# Parameters reach Execute in order, and the SQL byte for byte; the mock echoes
+# both.
+query I
+SELECT c0 FROM redshift_query('rs', 'SELECT  $3, $1,  $2 -- as written', params := ['third', 'first', 'second']);
+----
+SELECT  $3, $1,  $2 -- as written|$1=third|$2=first|$3=second
+
+# ---------------------------------------------------------------------------
+# A statement without a result set returns one row: its row count, or NULL when the client has
+# none to give.
+# ---------------------------------------------------------------------------
+query I
+SELECT rowcount FROM redshift_query('rs', 'norows rowcount=7');
+----
+7
+
+query I
+SELECT rowcount FROM redshift_query('rs', 'norows rowcount=none');
+----
+NULL
+
+query I
+SELECT count(*) FROM redshift_query('rs', 'norows rowcount=0');
+----
+1
+
+# ---------------------------------------------------------------------------
+# Batch boundaries never change the result. The client picks the batch
+# sizes, which can change within a result; the scan fills each DuckDB chunk of 2048 rows from as
+# many batches as it takes, and finishes a batch it read only part of on its next call. Each case
+# checks every row, in order. batch= lists the sizes, in turn, repeating.
+# ---------------------------------------------------------------------------
+statement ok
+CREATE MACRO reads_past_end() AS (SELECT count(*) FROM duckdb_logs WHERE message LIKE 'redshift mock: NextBatch was called after the result ended%');
+
+# One row per batch.
+query I
+SELECT list(c0) = range(5) FROM redshift_query('rs', 'rows=5 batch=1 types=int8');
+----
+true
+
+# Batches smaller than a chunk, which does not divide by them: 2048 is 682 batches of 3 and two
+# rows of the next, whose last row starts the second chunk.
+query I
+SELECT list(c0) = range(5000) FROM redshift_query('rs', 'rows=5000 batch=3 types=int8');
+----
+true
+
+# Batches the size of a chunk, then a last batch of one row.
+query I
+SELECT list(c0) = range(4097) FROM redshift_query('rs', 'rows=4097 batch=2048 types=int8');
+----
+true
+
+# Batch sizes that change within the result, as the client's buffer sets do when a long column's
+# values (VARBYTE is always one) end one early, crossing chunk boundaries at different points in a
+# batch.
+query I
+SELECT list(c0) = range(9000) FROM redshift_query('rs', 'rows=9000 batch=7,2048,1,1000,2047 types=int8,varbyte');
+----
+true
+
+# Batches larger than a chunk, read across several scan calls. Above the client's starting cap of
+# 2048 rows per batch.
+query I
+SELECT list(c0) = range(10000) FROM redshift_query('rs', 'rows=10000 batch=3000 types=int8');
+----
+true
+
+# A true, empty batch means "ask again", not "finished", which the transport header allows: the
+# result goes on after it.
+query I
+SELECT list(c0) = range(4000) FROM redshift_query('rs', 'rows=4000 batch=3,0,0,2000 types=int8');
+----
+true
+
+# A client may add rows to the batch it is given rather than replace them, which the header leaves
+# open: the scan clears each used-up batch first, so no row comes twice.
+query I
+SELECT list(c0) = range(5000) FROM redshift_query('rs', 'rows=5000 batch=3 append types=int8');
+----
+true
+
+# A result whose end comes in a scan call that returned rows: the next call returns nothing without
+# asking the client for another batch. The mock logs any NextBatch after its end.
+query I
+SELECT count(*) FROM redshift_query('rs', 'rows=3 types=int8');
+----
+3
+
+query II
+SELECT mock_executed(), reads_past_end();
+----
+14	0
+
+# ---------------------------------------------------------------------------
+# When DuckDB stops reading before the end, its result is destroyed with the query, and the session
+# is kept: a satisfied LIMIT, or an error elsewhere in the plan. Each result has
+# more rows than one DuckDB chunk, so it is still open when DuckDB stops. The mock refuses Execute
+# while a result is open, as the real client does, so the next call would fail had the result been
+# kept. All run on the same connection.
+# ---------------------------------------------------------------------------
+query I
+SELECT c0 FROM redshift_query('rs', 'rows=5000 batch=5 types=int8') LIMIT 2;
+----
+0
+1
+
+statement error
+SELECT c0::INTEGER FROM redshift_query('rs', 'rows=5000 cols=1');
+----
+Conversion Error: Could not convert string 'r0c0' to INT32
+
+query I
+SELECT count(*) FROM redshift_query('rs', 'rows=3 types=int8');
+----
+3
+
+query II
+SELECT mock_opened(), mock_closed();
+----
+1	0
+
+# ---------------------------------------------------------------------------
+# A statement whose result shape has changed since bind is refused before it runs, and the session
+# is kept. changed= stands in for a table or view replaced between bind and
+# execution: the client compares the shape bind described with the statement's and runs nothing,
+# so the message says this call did not run, that other calls in the same DuckDB statement may have
+# run, and that a prepared statement must be prepared again.
+# ---------------------------------------------------------------------------
+query I
+SELECT mock_executed();
+----
+17
+
+# A column's type.
+statement error
+SELECT * FROM redshift_query('rs', 'rows=3 types=int4 changed=varchar');
+----
+Binder Error: redshift_query: the statement on attach handle "rs" now returns different columns than when it was bound, so this call was not run on Redshift, but other calls in the same DuckDB statement may have run; check their effects on Redshift before running the statement again. If it is a prepared statement, prepare it again. The client reported: redshift mock: the statement's result shape is not the one it was bound with, so it was not run: column 1 was bound as "c0" INTEGER and is now "c0" VARCHAR
+
+# The row width.
+statement error
+SELECT * FROM redshift_query('rs', 'rows=3 types=int4 changed=int4,int4');
+----
+redshift_query: the statement on attach handle "rs" now returns different columns than when it was bound, so this call was not run on Redshift, but other calls in the same DuckDB statement may have run; check their effects on Redshift before running the statement again. If it is a prepared statement, prepare it again. The client reported: redshift mock: the statement's result shape is not the one it was bound with, so it was not run: it was bound with 1 column and now has 2
+
+# A DECIMAL's scale, and TIMESTAMP against TIMESTAMPTZ, whose carriers are the same.
+statement error
+SELECT * FROM redshift_query('rs', 'rows=3 types=numeric:12:2 changed=numeric:12:3');
+----
+redshift_query: the statement on attach handle "rs" now returns different columns than when it was bound, so this call was not run on Redshift, but other calls in the same DuckDB statement may have run; check their effects on Redshift before running the statement again. If it is a prepared statement, prepare it again. The client reported: redshift mock: the statement's result shape is not the one it was bound with, so it was not run: column 1 was bound as "c0" DECIMAL(12,2) and is now "c0" DECIMAL(12,3)
+
+statement error
+SELECT * FROM redshift_query('rs', 'rows=3 types=timestamp changed=timestamptz');
+----
+redshift_query: the statement on attach handle "rs" now returns different columns than when it was bound, so this call was not run on Redshift, but other calls in the same DuckDB statement may have run; check their effects on Redshift before running the statement again. If it is a prepared statement, prepare it again. The client reported: redshift mock: the statement's result shape is not the one it was bound with, so it was not run: column 1 was bound as "c0" TIMESTAMP and is now "c0" TIMESTAMPTZ
+
+# A statement bound without a result set that now returns rows.
+statement error
+SELECT * FROM redshift_query('rs', 'norows changed=int4');
+----
+redshift_query: the statement on attach handle "rs" now returns different columns than when it was bound, so this call was not run on Redshift, but other calls in the same DuckDB statement may have run; check their effects on Redshift before running the statement again. If it is a prepared statement, prepare it again. The client reported: redshift mock: the statement's result shape is not the one it was bound with, so it was not run: it was bound as a statement without a result set and now returns rows
+
+# A prepared statement that reads no DuckDB table keeps the bind DuckDB made at PREPARE, so it is
+# refused the same way at each EXECUTE, and the message says to prepare it again.
+statement ok
+PREPARE replaced AS SELECT * FROM redshift_query('rs', 'rows=3 types=int4 changed=int8');
+
+statement error
+EXECUTE replaced;
+----
+redshift_query: the statement on attach handle "rs" now returns different columns than when it was bound, so this call was not run on Redshift, but other calls in the same DuckDB statement may have run; check their effects on Redshift before running the statement again. If it is a prepared statement, prepare it again. The client reported: redshift mock: the statement's result shape is not the one it was bound with, so it was not run: column 1 was bound as "c0" INTEGER and is now "c0" BIGINT
+
+statement error
+EXECUTE replaced;
+----
+redshift_query: the statement on attach handle "rs" now returns different columns than when it was bound, so this call was not run on Redshift, but other calls in the same DuckDB statement may have run; check their effects on Redshift before running the statement again. If it is a prepared statement, prepare it again. The client reported: redshift mock: the statement's result shape is not the one it was bound with, so it was not run: column 1 was bound as "c0" INTEGER and is now "c0" BIGINT
+
+statement ok
+DEALLOCATE replaced;
+
+# None ran, and the next call runs on the same connection.
+query I
+SELECT mock_executed();
+----
+17
+
+query I
+SELECT count(*) FROM redshift_query('rs', 'rows=3 types=int8');
+----
+3
+
+query III
+SELECT mock_opened(), mock_closed(), mock_executed();
+----
+1	0	18
+
+# ---------------------------------------------------------------------------
+# A result that no longer matches the shape bind described is refused, never coerced.
+# unchecked stands in for a client that does not compare the shapes, as
+# the ODBC client does not until it checks a result's shape: the statement runs and the
+# client sends cells of the new types. The statement has run, so no message says running it again
+# is safe. Each keeps the session: the next call runs on the same connection.
+# ---------------------------------------------------------------------------
+
+# A cell of the wrong value kind: TEXT where an INTEGER was described.
+statement error
+SELECT * FROM redshift_query('rs', 'rows=3 types=int4 changed=varchar unchecked');
+----
+Redshift returned a result that does not match the shape described at bind: column 1 ("c0") is declared INTEGER but a cell arrived as a TEXT value. The remote table may have changed since the statement was bound. The statement may already have applied its effects on Redshift; check them before re-running it.
+
+# A row of the wrong width.
+statement error
+SELECT * FROM redshift_query('rs', 'rows=3 types=int4 changed=int4,int4 unchecked');
+----
+Redshift returned a result that does not match the shape described at bind: a row has 2 values, but 1 columns were described. The remote table may have changed since the statement was bound. The statement may already have applied its effects on Redshift; check them before re-running it.
+
+# An integer outside the described SMALLINT's range, in the 32769th row: the scan has already
+# returned whole chunks, and the result is still discarded.
+statement error
+SELECT * FROM redshift_query('rs', 'rows=32769 types=int2 changed=int4 unchecked');
+----
+Could not convert Redshift column 1 ("c0"): value 32768 is out of range for SMALLINT. To read the value as text, cast the column to VARCHAR in the Redshift SQL. The statement may already have applied its effects on Redshift; check them before re-running it.
+
+# Text the described TIMESTAMP cannot be read from.
+statement error
+SELECT * FROM redshift_query('rs', 'rows=3 types=timestamp changed=varchar unchecked');
+----
+Could not convert Redshift column 1 ("c0"): invalid timestamp field format: "r0c0"
+
+query I
+SELECT count(*) FROM redshift_query('rs', 'rows=3 types=int8');
+----
+3
+
+query III
+SELECT mock_opened(), mock_closed(), mock_executed();
+----
+1	0	23
+
+# The database was not invalidated: another DuckDB connection still works, with its own session.
+query I con2
+SELECT count(*) FROM redshift_query('rs', 'rows=3 types=int8');
+----
+3
+
+query II
+SELECT mock_opened(), mock_closed();
+----
+2	0
+
+# ---------------------------------------------------------------------------
+# A prepared statement remembers the handle it was bound to, without keeping it alive. After that
+# handle is detached, or detached and attached again under its name, EXECUTE runs nothing on
+# whatever has the name now.
+# ---------------------------------------------------------------------------
+statement ok
+PREPARE bound AS SELECT c0 FROM redshift_query('rs', 'rows=1 types=int8');
+
+query I
+EXECUTE bound;
+----
+0
+
+query I
+SELECT mock_executed();
+----
+25
+
+statement ok
+DETACH rs;
+
+statement error
+EXECUTE bound;
+----
+<REGEX>:Executor Error: redshift_query: attach handle "rs" was detached, or an ATTACH under its name was rolled back, after this statement was bound, so this call was not run on Redshift, though other calls in the same DuckDB statement may have run; check their effects on Redshift before running the statement again\. Attach the handle again, then prepare the statement again\.\n
+
+statement ok
+ATTACH '' AS rs (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+statement error
+EXECUTE bound;
+----
+<REGEX>:Executor Error: redshift_query: attach handle "rs" was detached or replaced, or an ATTACH under its name was rolled back, after this statement was bound, and another handle has the name now, so this call was not run on Redshift, though other calls in the same DuckDB statement may have run; check their effects on Redshift before running the statement again\. Its result shape was described through the earlier handle; prepare the statement again to bind it to the handle attached now\.\n
+
+statement ok
+ATTACH OR REPLACE ':memory:' AS rs;
+
+statement error
+EXECUTE bound;
+----
+<REGEX>:Executor Error: redshift_query: "rs" names a duckdb database now, not the Redshift handle this statement was bound to, so this call was not run on Redshift, though other calls in the same DuckDB statement may have run; check their effects on Redshift before running the statement again\. Attach a Redshift handle under another name and query that\.\n
+
+query I
+SELECT mock_executed();
+----
+25
+
+# Prepared again, it binds to the handle attached now.
+statement ok
+ATTACH OR REPLACE '' AS rs (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+statement ok
+PREPARE bound_again AS SELECT c0 FROM redshift_query('rs', 'rows=1 types=int8');
+
+query I
+EXECUTE bound_again;
+----
+0
+
+# Inside a DuckDB transaction none of this arises by default: the gate refuses the statement at
+# PREPARE, before it resolves the handle (transaction.test).
+statement ok
+BEGIN;
+
+statement error
+PREPARE in_transaction AS SELECT c0 FROM redshift_query('rs', 'rows=1 types=int8');
+----
+Binder Error: redshift_query cannot run while a DuckDB transaction is open
+
+statement ok
+ROLLBACK;
+
+query I
+SELECT mock_executed();
+----
+26
+
+# ---------------------------------------------------------------------------
+# The shape refusal speaks for its own call only. A DuckDB statement can read two handles, and the
+# call on the other handle may already have run when this one is refused, so the message says other
+# calls may have run.
+# ---------------------------------------------------------------------------
+statement ok
+ATTACH '' AS rs2 (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+query III
+SELECT mock_opened(), mock_closed(), mock_executed();
+----
+5	3	26
+
+statement error
+SELECT c0::VARCHAR FROM redshift_query('rs', 'rows=3 types=int8') UNION ALL SELECT c0::VARCHAR FROM redshift_query('rs2', 'rows=3 types=int4 changed=varchar');
+----
+Binder Error: redshift_query: the statement on attach handle "rs2" now returns different columns than when it was bound, so this call was not run on Redshift, but other calls in the same DuckDB statement may have run; check their effects on Redshift before running the statement again.
+
+# The call on rs ran, once: one more execution. rs2's pair described its statement on the
+# connection its ATTACH opened, so nothing opened, and nothing closed.
+query III
+SELECT mock_opened(), mock_closed(), mock_executed();
+----
+5	3	27
+
+# Both handles keep their sessions: the next calls run on the same connections, opening none.
+query II
+SELECT (SELECT count(*) FROM redshift_query('rs', 'rows=3 types=int8')), (SELECT count(*) FROM redshift_query('rs2', 'rows=3 types=int8'));
+----
+3	3
+
+query III
+SELECT mock_opened(), mock_closed(), mock_executed();
+----
+5	3	29
+
+statement ok
+DETACH rs2;
+
+# ---------------------------------------------------------------------------
+# A statement bound on a handle whose ATTACH another DuckDB connection then rolls back is refused
+# at execution as one bound on a detached handle is, and the refusal names the rollback too. Last,
+# since its bind opens a connection the counts above do not include.
+# ---------------------------------------------------------------------------
+statement ok con1
+BEGIN;
+
+statement ok con1
+ATTACH '' AS rs_rolled_back (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+statement ok
+PREPARE bound_rolled_back AS SELECT c0 FROM redshift_query('rs_rolled_back', 'rows=1 types=int8');
+
+statement ok con1
+ROLLBACK;
+
+statement error
+EXECUTE bound_rolled_back;
+----
+<REGEX>:Executor Error: redshift_query: attach handle "rs_rolled_back" was detached, or an ATTACH under its name was rolled back, after this statement was bound, so this call was not run on Redshift.*

@@ -1,0 +1,113 @@
+# name: test/mock/aborted_transaction.test
+# description: a refusal carrying SQLSTATE 25P02 tells the user how to end the aborted Redshift transaction, at bind and at execution
+# group: [mock]
+
+require-env REDSHIFT_TEST_CLIENT mock
+
+require redshift
+
+# While a Redshift transaction is aborted, Redshift refuses every statement until it ends. The
+# client carries the SQLSTATE its classifier acted on in the exception's extra_info, as `sqlstate`,
+# (the client's error format), and redshift_query reads only that field. Redshift
+# refuses at prepare, so the client reports 25P02 as a refusal, from Describe or from the prepare
+# inside Execute, never as a failure of a statement that ran. sqlstates= gives the mock's refusal or
+# failure its diagnostic records, in order; the classifier's state is the first that is not HY000. The mock keeps no transaction, so each case first opens one and
+# makes a statement fail in it, as a user's session would, before the refusal the client would
+# then return. The error's type shows in its message; the C++ tests check the extra_info, which SQL
+# cannot read.
+statement ok
+CALL enable_logging(level = 'debug');
+
+statement ok
+CREATE MACRO mock_opened() AS (SELECT count(*) FROM duckdb_logs WHERE message LIKE 'redshift mock: opened a connection to %');
+
+statement ok
+CREATE MACRO mock_closed() AS (SELECT count(*) FROM duckdb_logs WHERE message LIKE 'redshift mock: closed a connection to %');
+
+statement ok
+ATTACH '' AS rs (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+# A transaction the user opens, with a statement prepared while it is still healthy.
+statement ok
+SELECT * FROM redshift_query('rs', 'BEGIN');
+
+statement ok
+PREPARE aborted_since AS SELECT * FROM redshift_query('rs', 'error=current_transaction_is_aborted error_at=execute sqlstates=25P02');
+
+# A statement fails, which aborts the transaction.
+statement error
+SELECT * FROM redshift_query('rs', 'fail=execute sqlstates=22012');
+----
+<REGEX>:Executor Error: redshift mock: the statement failed while it ran\nSQLSTATE: 22012\n
+
+# At execution: the prepare inside Execute is refused. The guidance names the handle, in the
+# message and in the ROLLBACK to run, after the client's message and its SQLSTATE line.
+statement error
+EXECUTE aborted_since;
+----
+<REGEX>:Binder Error: Redshift rejected the statement: current_transaction_is_aborted\nSQLSTATE: 25P02\nThe Redshift transaction on attach handle "rs" is aborted, so Redshift refuses every statement until it ends\. Run redshift_query\('rs', 'ROLLBACK'\) to end it\. Work done in that transaction since the error is lost; running COMMIT instead would also roll it back\.\n
+
+# At bind: Describe's prepare is refused.
+statement error
+SELECT * FROM redshift_query('rs', 'error=current_transaction_is_aborted sqlstates=25P02');
+----
+<REGEX>:Binder Error: Redshift rejected the statement: current_transaction_is_aborted\nSQLSTATE: 25P02\nThe Redshift transaction on attach handle "rs" is aborted, so Redshift refuses every statement until it ends\. Run redshift_query\('rs', 'ROLLBACK'\) to end it\. Work done in that transaction since the error is lost; running COMMIT instead would also roll it back\.\n\nLINE 1:.*
+
+# The state is found where the classifier put it, after a generic first record.
+statement error
+SELECT * FROM redshift_query('rs', 'error=current_transaction_is_aborted sqlstates=HY000,25P02');
+----
+<REGEX>:Binder Error: Redshift rejected the statement: current_transaction_is_aborted\nSQLSTATE: 25P02\nThe Redshift transaction on attach handle "rs" is aborted, so Redshift refuses every statement until it ends\..*
+
+# The ROLLBACK the guidance names runs on the same session. The mock keeps no transaction, so this
+# shows only that the session is kept; a live test checks the ROLLBACK on the real client, where it
+# publishes a row count rather than the mock's echo, so the test counts rows.
+query I
+SELECT count(*) FROM redshift_query('rs', 'ROLLBACK');
+----
+1
+
+# No guidance for another state, another state of class 25, or 25P02 in the message alone: the
+# message ends at its SQLSTATE line.
+statement error
+SELECT * FROM redshift_query('rs', 'error=refused sqlstates=42601');
+----
+<REGEX>:Binder Error: Redshift rejected the statement: refused\nSQLSTATE: 42601\n\nLINE 1:.*
+
+statement error
+SELECT * FROM redshift_query('rs', 'error=refused sqlstates=25P01');
+----
+<REGEX>:Binder Error: Redshift rejected the statement: refused\nSQLSTATE: 25P01\n\nLINE 1:.*
+
+statement error
+SELECT * FROM redshift_query('rs', 'error=current_transaction_is_aborted_25P02 sqlstates=42601');
+----
+<REGEX>:Binder Error: Redshift rejected the statement: current_transaction_is_aborted_25P02\nSQLSTATE: 42601\n\nLINE 1:.*
+
+# A handle whose name needs quoting is quoted in both places.
+statement ok
+ATTACH '' AS "it's" (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+statement ok
+SELECT * FROM redshift_query('it''s', 'BEGIN');
+
+statement error
+SELECT * FROM redshift_query('it''s', 'fail=execute sqlstates=22012');
+----
+SQLSTATE: 22012
+
+statement error
+SELECT * FROM redshift_query('it''s', 'error=aborted sqlstates=25P02');
+----
+The Redshift transaction on attach handle "it's" is aborted, so Redshift refuses every statement until it ends. Run redshift_query('it''s', 'ROLLBACK') to end it.
+
+# None of these lost the session: each handle's connection is still its first one.
+query I
+SELECT count(*) FROM redshift_query('rs', 'rows=2');
+----
+2
+
+query II
+SELECT mock_opened(), mock_closed();
+----
+2	0

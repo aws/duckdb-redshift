@@ -1,0 +1,17 @@
+build
+# A build's record of the commit it built.
+/.*-source-commit
+.idea
+cmake-build-debug
+duckdb_unittest_tempdir/
+.DS_Store
+testext
+test/python/__pycache__/
+.Rhistory
+
+# clangd index and compile_commands copy, written by an editor or build container.
+.cache/
+
+# DuckDB, the tree the build compiles against: `make duckdb` clones the commit duckdb.commit pins
+# here, or a developer links a DuckDB tree of their own. No slash at the end, so a link is ignored too.
+/duckdb

@@ -1,0 +1,7 @@
+# Whole strings in the Windows set's DLLs that equal a set member's bare base name (no .dll) and are
+# not a lookup of that DLL, which the rename leaves as they are. Only krb5_64 and wshelp64 look
+# themselves up by a bare name; any other such string refuses rename_pin.py and rename_check.py
+# unless a row here keeps it, for that file's SHA-256 and offset, with the reason the reviewer read.
+# A row whose file has another SHA-256, or holds no such string at the offset, refuses both tools,
+# so a new driver release is read again. <file> <file sha256> <offset> <text> <reason>
+ssl.dll  822194ca6824a40d876093ab1a9ffcf7b53df42a8f37be224cd9df6418a9f6f7  406432  SSL  BIO method display name (BIO_TYPE_SSL's method, the one pointer to it), next to custom_extensions.cc; not a module load

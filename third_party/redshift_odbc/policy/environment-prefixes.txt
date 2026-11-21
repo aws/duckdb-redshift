@@ -1,0 +1,17 @@
+# Name prefixes the environment-name rule scans the driver binary for, besides ^PG[A-Z_]+$. A string
+# found under one of them must be in refused-environment.txt, known-environment.txt or, if it is not
+# a variable, ignored-strings.txt. One prefix per line.
+SSL
+AWS_
+KRB5
+CURL
+ODBC
+AMAZON
+HTTP_PROXY
+HTTPS_PROXY
+ALL_PROXY
+NO_PROXY
+http_proxy
+https_proxy
+all_proxy
+no_proxy

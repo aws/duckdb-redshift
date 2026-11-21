@@ -1,0 +1,468 @@
+# name: test/mock/bind.test
+# description: redshift_query binds from Describe alone: argument checks, published shapes, and no execution at bind
+# group: [mock]
+
+require-env REDSHIFT_TEST_CLIENT mock
+
+require redshift
+
+require icu
+
+# Opens, Describe calls and executions are counted from the lines the mock logs through DuckDB's
+# logger: one per connection it opens, per statement it describes, and per statement it executes.
+statement ok
+CALL enable_logging(level = 'debug');
+
+statement ok
+CREATE MACRO mock_opened() AS (SELECT count(*) FROM duckdb_logs WHERE message LIKE 'redshift mock: opened a connection to %');
+
+statement ok
+CREATE MACRO mock_described() AS (SELECT count(*) FROM duckdb_logs WHERE message LIKE 'redshift mock: described a statement on %');
+
+statement ok
+CREATE MACRO mock_executed() AS (SELECT count(*) FROM duckdb_logs WHERE message LIKE 'redshift mock: executed a statement on %');
+
+statement ok
+ATTACH '' AS rs (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+# ---------------------------------------------------------------------------
+# Binding describes and never executes, however many times DuckDB binds.
+# ---------------------------------------------------------------------------
+statement ok
+DESCRIBE SELECT * FROM redshift_query('rs', 'rows=3 cols=2');
+
+statement ok
+DESCRIBE SELECT * FROM redshift_query('rs', 'rows=3 cols=2');
+
+statement ok
+EXPLAIN SELECT * FROM redshift_query('rs', 'rows=3 cols=2');
+
+statement ok
+PREPARE bound AS SELECT * FROM redshift_query('rs', 'rows=3 cols=2');
+
+query III
+SELECT mock_opened(), mock_described(), mock_executed();
+----
+1	4	0
+
+statement ok
+DEALLOCATE bound;
+
+# ---------------------------------------------------------------------------
+# A refusal at Describe surfaces at bind, Redshift's refusal of a multi-statement string included,
+# and nothing executes. The extension does not look for the ';' itself. The pair keeps
+# its connection.
+# ---------------------------------------------------------------------------
+statement error
+SELECT * FROM redshift_query('rs', 'error=relation_t_does_not_exist');
+----
+Binder Error: Redshift rejected the statement: relation_t_does_not_exist
+
+statement error
+SELECT * FROM redshift_query('rs', 'norows; norows');
+----
+Binder Error: Redshift rejected the statement: cannot insert multiple commands into a prepared statement
+
+# A ';' inside a string is not a second statement, and a trailing one is not either.
+query I
+SELECT c0 FROM redshift_query('rs', 'SELECT '';'';');
+----
+SELECT ';';
+
+query III
+SELECT mock_opened(), mock_described(), mock_executed();
+----
+1	5	1
+
+# ---------------------------------------------------------------------------
+# Malformed arguments are user errors, raised before any transport call.
+# ---------------------------------------------------------------------------
+statement error
+SELECT * FROM redshift_query(NULL, 'rows=1');
+----
+Binder Error: redshift_query: the handle argument cannot be NULL
+
+statement error
+SELECT * FROM redshift_query('rs', NULL);
+----
+Binder Error: redshift_query: the SQL argument cannot be NULL
+
+statement error
+SELECT * FROM redshift_query('rs', '');
+----
+Binder Error: redshift_query: the SQL argument is empty
+
+statement error
+SELECT * FROM redshift_query('rs');
+----
+redshift_query(handle VARCHAR, "sql" VARCHAR, /, **"options" ANY)
+
+statement error
+SELECT * FROM redshift_query('rs', 'rows=1', 'rows=2');
+----
+redshift_query(handle VARCHAR, "sql" VARCHAR, /, **"options" ANY)
+
+statement error
+SELECT * FROM redshift_query('rs', 'rows=1', other := 1);
+----
+Binder Error: Invalid named parameter "other" for function redshift_query
+
+# The arguments are foldable constants: DuckDB refuses a subquery or a column reference.
+statement error
+SELECT * FROM redshift_query('rs', (SELECT 'rows=1'));
+----
+Binder Error: Table function cannot contain subqueries
+
+statement ok
+CREATE TABLE statements AS SELECT 'rows=1' AS s;
+
+statement error
+SELECT * FROM statements, redshift_query('rs', statements.s);
+----
+Binder Error
+
+# ---------------------------------------------------------------------------
+# params: a list of strings, bound positionally at execution and never written into the SQL.
+# The mock echoes what it was given.
+# ---------------------------------------------------------------------------
+query I
+SELECT c0 FROM redshift_query('rs', 'SELECT $1, $2', params := ['first', 'second']);
+----
+SELECT $1, $2|$1=first|$2=second
+
+query I
+SELECT c0 FROM redshift_query('rs', 'SELECT 1', params := []);
+----
+SELECT 1
+
+statement error
+SELECT * FROM redshift_query('rs', 'SELECT $1', params := NULL);
+----
+Binder Error: redshift_query: params cannot be NULL. Omit it, or pass a list of strings such as params := ['a', 'b']
+
+statement error
+SELECT * FROM redshift_query('rs', 'SELECT $1, $2', params := ['a', NULL]);
+----
+Binder Error: redshift_query: parameter 2 is NULL, and NULL parameters are not supported. Write NULL in the Redshift SQL instead of binding it
+
+statement error
+SELECT * FROM redshift_query('rs', 'SELECT $1', params := 'a');
+----
+Could not cast value 'a' to named parameter "params" of type VARCHAR[]
+
+query III
+SELECT mock_opened(), mock_described(), mock_executed();
+----
+1	7	3
+
+# ---------------------------------------------------------------------------
+# Published shapes: the described columns with their names, order and mapped
+# types, or one rowcount BIGINT for a statement with no result set.
+# ---------------------------------------------------------------------------
+query II
+SELECT column_name, column_type FROM (DESCRIBE SELECT * FROM redshift_query('rs', 'types=bool,int2,int4,int8,float4,float8,numeric:10:2,numeric:38:38,varchar,date,time,timetz,timestamp,timestamptz,varbyte,char'));
+----
+c0	BOOLEAN
+c1	SMALLINT
+c2	INTEGER
+c3	BIGINT
+c4	FLOAT
+c5	DOUBLE
+c6	DECIMAL(10,2)
+c7	DECIMAL(38,38)
+c8	VARCHAR
+c9	DATE
+c10	TIME
+c11	TIME WITH TIME ZONE
+c12	TIMESTAMP
+c13	TIMESTAMP WITH TIME ZONE
+c14	BLOB
+c15	VARCHAR
+
+query II
+SELECT column_name, column_type FROM (DESCRIBE SELECT * FROM redshift_query('rs', 'norows'));
+----
+rowcount	BIGINT
+
+# Typed values arrive and land in their declared types.
+# TIMESTAMPTZ prints in the session's time zone, so the test fixes it.
+statement ok
+SET TimeZone = 'UTC';
+
+query IIIIII
+SELECT c0, c1, c2, c3, c4, c5 FROM redshift_query('rs', 'rows=2 types=int4,numeric:10:2,date,timestamptz,bool,varbyte');
+----
+0	0.00	2024-01-01	2024-01-01 12:00:00+00	true	r0\x00c5
+1	1.00	2024-01-02	2024-01-01 12:00:01+00	false	r1\x00c5
+
+# A CHAR column lands as VARCHAR without the trailing blanks the client sends, which Redshift
+# ignores, so DuckDB compares and measures it as Redshift does.
+query III
+SELECT '[' || c0 || ']', length(c0), c0 = 'r0c0' FROM redshift_query('rs', 'rows=1 types=char');
+----
+[r0c0]	4	true
+
+statement ok
+RESET TimeZone;
+
+query IIIIIIII
+SELECT c0, c1, c2, c3, c4, c5, c6, c7 FROM redshift_query('rs', 'rows=2 types=int2,int8,float4,float8,time,timetz,timestamp,numeric:38:38');
+----
+0	0	0.5	0.5	12:00:00	12:00:00+05	2024-01-01 12:00:00	0.00000000000000000000000000000000000000
+1	1	1.5	1.5	12:00:01	12:00:01+05	2024-01-01 12:00:01	0.00000000000000000000000000000000000000
+
+# Type names are case-insensitive.
+query II
+SELECT column_name, column_type FROM (DESCRIBE SELECT * FROM redshift_query('rs', 'types=INT4,Varchar'));
+----
+c0	INTEGER
+c1	VARCHAR
+
+query I
+SELECT rowcount FROM redshift_query('rs', 'norows');
+----
+0
+
+# A column the client classifies as UNKNOWN, here a GEOMETRY, is refused at bind, naming the
+# column, and nothing executes. The refusal keeps the pair's session: the open
+# count stays 1 through every later call below. RedshiftTypeMapping::ToOutputSchema throws this
+# refusal and the shape refusal from the same point in bind, so this also shows that
+# a shape refusal keeps the session, which no mock directive can produce.
+query III
+SELECT mock_opened(), mock_described(), mock_executed();
+----
+1	14	7
+
+statement error
+SELECT * FROM redshift_query('rs', 'types=int4,geometry');
+----
+Binder Error: Redshift column 2 ("c1") has a type this extension does not support. Cast it to a supported type in the Redshift SQL. No Redshift statement was executed.
+
+query III
+SELECT mock_opened(), mock_described(), mock_executed();
+----
+1	15	7
+
+# ---------------------------------------------------------------------------
+# Statement verification. DuckDB v2.0.1 has no mode that runs a statement more
+# than once: PRAGMA enable_verification only warns, and debug_verify_statement runs the statement
+# once, as written or replaced by one rewritten statement. So nothing is refused, and each mode
+# below executes the Redshift statement exactly once, checked after each. explain_statement binds it
+# twice, so it describes it twice; prepared_statement turns the arguments into parameters, so its
+# PREPARE defers the bind and its EXECUTE describes and runs the statement once. The EXPLAIN_SQL
+# modes run their nested EXPLAIN with autocommit off, which the transaction gate refuses by default,
+# so they are left to it. The deprecated pragma stays on purpose: if a DuckDB upgrade gives it back
+# its v1.5 meaning, this count changes, and if one removes it, this statement fails; either way
+# this case needs another look.
+# ---------------------------------------------------------------------------
+statement ok
+PRAGMA enable_verification;
+
+statement ok
+SELECT * FROM redshift_query('rs', 'rows=1');
+
+statement ok
+PRAGMA disable_verification;
+
+query II
+SELECT mock_described(), mock_executed();
+----
+16	8
+
+statement ok
+SET debug_verify_statement = 'copy_statement';
+
+statement ok
+SELECT * FROM redshift_query('rs', 'rows=1');
+
+statement ok
+RESET debug_verify_statement;
+
+query II
+SELECT mock_described(), mock_executed();
+----
+17	9
+
+statement ok
+SET debug_verify_statement = 'reparse_statement';
+
+statement ok
+SELECT * FROM redshift_query('rs', 'rows=1');
+
+statement ok
+RESET debug_verify_statement;
+
+query II
+SELECT mock_described(), mock_executed();
+----
+18	10
+
+statement ok
+SET debug_verify_statement = 'serialize_statement';
+
+statement ok
+SELECT * FROM redshift_query('rs', 'rows=1');
+
+statement ok
+RESET debug_verify_statement;
+
+query II
+SELECT mock_described(), mock_executed();
+----
+19	11
+
+statement ok
+SET debug_verify_statement = 'prepared_statement';
+
+statement ok
+SELECT * FROM redshift_query('rs', 'rows=1');
+
+statement ok
+RESET debug_verify_statement;
+
+query II
+SELECT mock_described(), mock_executed();
+----
+20	12
+
+statement ok
+SET debug_verify_statement = 'explain_statement';
+
+statement ok
+SELECT * FROM redshift_query('rs', 'rows=1');
+
+statement ok
+RESET debug_verify_statement;
+
+query II
+SELECT mock_described(), mock_executed();
+----
+22	13
+
+# ---------------------------------------------------------------------------
+# DuckDB commit and rollback do no Redshift work. The pair already has a session.
+# A transaction whose only use of the handle is a refused catalog lookup describes, executes and
+# opens nothing, committed or rolled back. These forms stay valid while redshift_query is refused
+# inside a DuckDB transaction.
+# ---------------------------------------------------------------------------
+query III
+SELECT mock_opened(), mock_described(), mock_executed();
+----
+1	22	13
+
+statement ok
+BEGIN;
+
+statement error
+SELECT * FROM rs.main.t;
+----
+cannot be browsed as a catalog
+
+statement ok
+COMMIT;
+
+statement ok
+BEGIN;
+
+statement error
+SELECT * FROM rs.main.t;
+----
+cannot be browsed as a catalog
+
+statement ok
+ROLLBACK;
+
+query III
+SELECT mock_opened(), mock_described(), mock_executed();
+----
+1	22	13
+
+# An autocommit redshift_query adds exactly its own Describe and execution, and its commit adds
+# nothing.
+statement ok
+SELECT * FROM redshift_query('rs', 'norows');
+
+query III
+SELECT mock_opened(), mock_described(), mock_executed();
+----
+1	23	14
+
+# The mock keeps each value in its type's range at any row count, as the real client's are: SMALLINT
+# values wrap, and dates and times stay valid. TIMESTAMPTZ prints in the session's time zone.
+statement ok
+SET TimeZone = 'UTC';
+
+query IIIIIII
+SELECT max(c0), max(c1), max(c2), max(c3), max(c4), max(c5), count(*) FROM redshift_query('rs', 'rows=40000 types=int2,date,time,timetz,timestamp,timestamptz');
+----
+32767	2024-01-28	12:00:59	12:00:59+05	2024-01-01 12:00:59	2024-01-01 12:00:59+00	40000
+
+statement ok
+RESET TimeZone;
+
+# A repeated column name, as a Redshift join's SELECT * reports it, is published with DuckDB's suffix,
+# and the renamed column can be read.
+query I
+SELECT column_name FROM (DESCRIBE SELECT * FROM redshift_query('rs', 'types=int4,int4,int4 names=id,id,ID'));
+----
+id
+id_1
+ID_2
+
+query I
+SELECT id_1 FROM redshift_query('rs', 'types=int4,int4,int4 names=id,id,ID');
+----
+0
+
+query III
+SELECT mock_opened(), mock_described(), mock_executed();
+----
+1	26	16
+
+# A DECIMAL with no fraction digits arrives as an integer's text.
+query I
+SELECT c0 FROM redshift_query('rs', 'rows=2 types=numeric:5:0');
+----
+0
+1
+
+# params as DuckDB delivers them: cast to VARCHAR[] after the list's elements are unified to one
+# type, so a number arrives as DuckDB's text for that type.
+query I
+SELECT c0 FROM redshift_query('rs', 'SELECT $1, $2', params := [42, 4.5]);
+----
+SELECT $1, $2|$1=42.0|$2=4.5
+
+# A prepared call keeps its params: described once at PREPARE, then run with the same values at
+# each EXECUTE. An element given at EXECUTE binds like a constant, and a NULL one is refused before
+# anything is described.
+statement ok
+PREPARE kept AS SELECT c0 FROM redshift_query('rs', 'SELECT $1', params := ['k']);
+
+query I
+EXECUTE kept;
+----
+SELECT $1|$1=k
+
+query I
+EXECUTE kept;
+----
+SELECT $1|$1=k
+
+statement ok
+PREPARE given AS SELECT c0 FROM redshift_query('rs', 'SELECT $1', params := [?]);
+
+query I
+EXECUTE given('v');
+----
+SELECT $1|$1=v
+
+statement error
+EXECUTE given(NULL);
+----
+parameter 1 is NULL
+
+query III
+SELECT mock_opened(), mock_described(), mock_executed();
+----
+1	30	21

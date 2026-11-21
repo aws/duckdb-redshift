@@ -1,0 +1,334 @@
+# name: test/client/sql/inserted_values.test
+# description: live: 10,000 rows of every supported type, inserted from values the test generates, arrive as inserted, or as Redshift stores them, and as Redshift's own text of them
+# group: [sql]
+
+require-env REDSHIFT_TEST_CLIENT odbc
+
+# Live only (test/README.md, "Live variables"): it needs REDSHIFT_TEST_LIVE_REGION and a build with
+# the embedded driver.
+require-env REDSHIFT_TEST_LIVE_REGION
+
+# The account-backed workgroup the live tests reach (test/README.md, "Live variables").
+require-env REDSHIFT_TEST_LIVE_WORKGROUP
+
+require-env REDSHIFT_TEST_LIVE_ACCOUNT_ID
+
+require redshift
+
+# TIMESTAMPTZ casts follow the session time zone, icu's setting, which the test fixes at UTC.
+require icu
+
+# The SUPER key sort reads and writes JSON.
+require json
+
+statement ok
+SET TimeZone = 'UTC';
+
+statement ok
+ATTACH '' AS rs (TYPE redshift, REGION '{REDSHIFT_TEST_LIVE_REGION}', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP '{REDSHIFT_TEST_LIVE_WORKGROUP}', ACCOUNT_ID '{REDSHIFT_TEST_LIVE_ACCOUNT_ID}');
+
+# The expected values are the ones DuckDB generates and sends as literals, so the expected side shares
+# nothing with Redshift or the client: what was inserted must come back, compared exactly, in both
+# directions.
+
+# Pseudo-random but deterministic: n buckets from the MD5 of the row and a salt naming the use. The
+# MD5 is a UHUGEINT, which with a signed n would be computed as a DOUBLE, so n is cast.
+statement ok
+CREATE MACRO pick(row_id, salt, n) AS (md5_number(row_id::VARCHAR || '/' || salt) % n::UHUGEINT)::HUGEINT;
+
+statement ok
+CREATE MACRO sometimes_null(row_id, salt, value) AS CASE WHEN pick(row_id, salt || '/null', 100) = 0 THEN NULL ELSE value END;
+
+statement ok
+CREATE MACRO picked_text(row_id, salt, alphabet, count) AS
+    array_to_string(list_transform(range(count), lambda k: alphabet[pick(row_id, salt || '/' || k, len(alphabet))::INTEGER + 1]), '');
+
+# A finite value with a random sign, a mantissa from 1 to 2 in 2^52 steps and a power of ten. The
+# power is parsed from text, which rounds correctly everywhere, where pow follows the platform's libm.
+statement ok
+CREATE MACRO picked_float(row_id, salt, lowest_power, powers) AS
+    (CASE WHEN pick(row_id, salt || '/sign', 2) = 0 THEN -1 ELSE 1 END) * (1 + pick(row_id, salt, 4503599627370496)::DOUBLE / 4503599627370496)
+    * ('1e' || (pick(row_id, salt || '/power', powers)::INTEGER + lowest_power))::DOUBLE;
+
+statement ok
+CREATE MACRO time_text(micros) AS (TIME '00:00:00' + to_microseconds(micros::BIGINT))::VARCHAR;
+
+statement ok
+CREATE MACRO offset_text(seconds) AS
+    CASE WHEN seconds < 0 THEN '-' ELSE '+' END || lpad((abs(seconds) // 3600)::VARCHAR, 2, '0') || ':' ||
+    lpad((abs(seconds) // 60 % 60)::VARCHAR, 2, '0') || ':' || lpad((abs(seconds) % 60)::VARCHAR, 2, '0');
+
+# DuckDB writes a BC date as `4713-01-01 (BC) 00:00:00+00`, Redshift as `4713-01-01 00:00:00+00 BC`.
+statement ok
+CREATE MACRO redshift_era(t) AS regexp_replace(t, '^(\d+-\d\d-\d\d) \(BC\)(.*)$', '\1\2 BC');
+
+statement ok
+CREATE MACRO duckdb_era(t) AS regexp_replace(t, '^(\d+-\d\d-\d\d)(.*) BC$', '\1 (BC)\2');
+
+statement ok
+CREATE MACRO quoted(t) AS '''' || t || '''';
+
+statement ok
+CREATE MACRO utf8_literal(t) AS 'FROM_VARBYTE(FROM_HEX(''' || hex(encode(t)) || '''), ''utf8'')';
+
+# 17 significant digits identify every float8, and so every float4 widened to one.
+statement ok
+CREATE MACRO float_literal(x, type) AS
+    '''' || CASE WHEN isnan(x) THEN 'NaN' WHEN isinf(x) AND x > 0 THEN 'Infinity' WHEN isinf(x) THEN '-Infinity'
+                 ELSE printf('%.17g', x::DOUBLE) END || '''::' || type;
+
+statement ok
+CREATE MACRO object_text(pairs) AS '{' || array_to_string(list_transform(pairs, lambda p: to_json(p[1]) || ':' || p[2]), ',') || '}';
+
+# Redshift promises no key order, so SUPER objects are compared with their keys sorted.
+statement ok
+CREATE MACRO sorted_keys(document) AS
+    CASE WHEN json_type(document) = 'OBJECT'
+         THEN object_text(list_sort(list_transform(json_keys(document), lambda k: [k, json_extract(document, '$."' || k || '"')::VARCHAR])))
+         ELSE document END;
+
+# Bit for bit but a NaN's payload, which no text carries: the value and its sign bit, so -0 is not
+# 0, and NaN by isnan.
+statement ok
+CREATE MACRO float_bits(x) AS {'value': CASE WHEN isnan(x) THEN NULL ELSE x END, 'negative': signbit(x), 'nan': isnan(x)};
+
+statement ok
+CREATE MACRO exact_rows(table_name) AS TABLE
+    SELECT row_id, boolean_value, smallint_value, integer_value, bigint_value, float_bits(real_value) AS real_value,
+        float_bits(double_value) AS double_value, decimal_38_10, decimal_4_2, char_value, varchar_value, date_value,
+        time_value, timetz_value, timestamp_value, timestamptz_value, varbyte_value, sorted_keys(super_value) AS super_value
+    FROM query_table(table_name);
+
+statement ok
+CREATE MACRO digits(row_id, salt, count) AS
+    lpad(pick(row_id, salt, ('1' || repeat('0', count))::HUGEINT)::VARCHAR, count, '0');
+
+statement ok
+CREATE MACRO micros_between(row_id, salt, low, high) AS
+    epoch_us(low)::HUGEINT + pick(row_id, salt, epoch_us(high)::HUGEINT - epoch_us(low) + 1);
+
+# Half of the dates and timestamps are from 1900 to 2100, as most data is; the rest span Redshift's range
+# that DuckDB shares, from 4713 BC.
+statement ok
+CREATE MACRO common_or_wide(row_id, salt, low, high) AS
+    CASE WHEN pick(row_id, salt || '/common', 2) = 0 THEN micros_between(row_id, salt, TIMESTAMP '1900-01-01 00:00:00', TIMESTAMP '2100-12-31 23:59:59.999999')
+         ELSE micros_between(row_id, salt, low, high) END;
+
+statement ok
+CREATE MACRO edge_or(row_id, edges, value) AS CASE WHEN row_id < len(edges) THEN edges[row_id + 1] ELSE value END;
+
+# Every value the test inserts. The first rows hold edge values: the float8 edges and the float4
+# edges that 8 significant digits do and do not carry, the integer, decimal, text and date limits,
+# BC dates, TIMETZ's widest offsets, a TIMESTAMPTZ written with a seconds offset (New York's before
+# 1883-11-18) and the empty text, bytes and object. After them about 1 value in 100 is NULL. The
+# CHAR alphabet has no quote or backslash, as a CHAR goes as a plain literal; VARCHAR and SUPER go
+# as hex.
+statement ok
+CREATE TABLE generated AS
+WITH random_values AS (
+    SELECT row_id,
+        sometimes_null(row_id, 'boolean', pick(row_id, 'boolean', 2) = 1) AS boolean_value,
+        sometimes_null(row_id, 'smallint', pick(row_id, 'smallint', 65536) - 32768)::SMALLINT AS smallint_value,
+        sometimes_null(row_id, 'integer', pick(row_id, 'integer', 4294967296) - 2147483648)::INTEGER AS integer_value,
+        sometimes_null(row_id, 'bigint', pick(row_id, 'bigint', 18446744073709551616) - 9223372036854775808)::BIGINT AS bigint_value,
+        sometimes_null(row_id, 'real', picked_float(row_id, 'real', -35, 71))::FLOAT AS real_value,
+        sometimes_null(row_id, 'double', picked_float(row_id, 'double', -300, 601)) AS double_value,
+        sometimes_null(row_id, 'decimal_38_10', (CASE WHEN pick(row_id, 'decimal_38_10/sign', 2) = 0 THEN '-' ELSE '' END ||
+            left(digits(row_id, 'decimal_38_10', 38), 28) || '.' || right(digits(row_id, 'decimal_38_10', 38), 10))::DECIMAL(38,10)) AS decimal_38_10,
+        sometimes_null(row_id, 'decimal_4_2', (pick(row_id, 'decimal_4_2', 19999) - 9999)::DECIMAL(6,0) / 100)::DECIMAL(4,2) AS decimal_4_2,
+        sometimes_null(row_id, 'char', picked_text(row_id, 'char', split('abcXYZ019 ~!@#$%^&*()_+-=[]{};:,./<>?|', ''), pick(row_id, 'char/length', 13)::INTEGER)) AS char_value,
+        sometimes_null(row_id, 'varchar', picked_text(row_id, 'varchar', ['a', 'Z', '0', ' ', '~', 'é', 'ü', '€', '中', '😀', '🎉', '"', ''''], pick(row_id, 'varchar/length', 76)::INTEGER)) AS varchar_value,
+        sometimes_null(row_id, 'date', make_timestamp(common_or_wide(row_id, 'date', TIMESTAMP '4713-01-01 (BC) 00:00:00', TIMESTAMP '294246-12-31 23:59:59')::BIGINT)::DATE) AS date_value,
+        sometimes_null(row_id, 'time', pick(row_id, 'time', 86400000000)) AS time_micros,
+        sometimes_null(row_id, 'timetz', pick(row_id, 'timetz', 86400000000)) AS timetz_micros,
+        pick(row_id, 'timetz/offset', 115199) - 57599 AS timetz_offset,
+        sometimes_null(row_id, 'timestamp', common_or_wide(row_id, 'timestamp', TIMESTAMP '4713-01-01 (BC) 00:00:00', TIMESTAMP '294246-12-31 23:59:59.999999')) AS timestamp_micros,
+        -- A day inside each end, so that the offset the literal is written in stays in range.
+        sometimes_null(row_id, 'timestamptz', common_or_wide(row_id, 'timestamptz', TIMESTAMP '4713-01-02 (BC) 00:00:00', TIMESTAMP '294246-12-30 23:59:59.999999')) AS timestamptz_micros,
+        (pick(row_id, 'timestamptz/offset', 1561) - 720) * 60 AS timestamptz_offset,
+        sometimes_null(row_id, 'varbyte', left(md5(row_id || '/1') || md5(row_id || '/2') || md5(row_id || '/3') || md5(row_id || '/4'),
+            2 * pick(row_id, 'varbyte/length', 65)::INTEGER)) AS varbyte_hex,
+        sometimes_null(row_id, 'super', [['a', pick(row_id, 'super/a', 1000000)::VARCHAR], ['b', CASE WHEN pick(row_id, 'super/b', 2) = 0 THEN 'true' ELSE 'false' END],
+            ['m', to_json(picked_text(row_id, 'super/m', ['a', 'Z', ' ', 'é', '€', '中', '😀'], pick(row_id, 'super/m/length', 9)::INTEGER))::VARCHAR],
+            ['z', '[' || row_id || ',null]']]) AS super_pairs
+    FROM range(10000) t(row_id)
+)
+SELECT row_id,
+    edge_or(row_id, [true, false], boolean_value) AS boolean_value,
+    edge_or(row_id, [-32768, 32767, 0]::SMALLINT[], smallint_value) AS smallint_value,
+    edge_or(row_id, [-2147483648, 2147483647, 0]::INTEGER[], integer_value) AS integer_value,
+    edge_or(row_id, [-9223372036854775808, 9223372036854775807, 0]::BIGINT[], bigint_value) AS bigint_value,
+    edge_or(row_id, ['16777216', '123456.7', '3.4028234e38', '1.1754944e-38', '100000024']::FLOAT[], real_value) AS real_value,
+    edge_or(row_id, ['0.30000000000000004', '9007199254740992', '1.7976931348623157e308', '2.2250738585072014e-308', '-0', 'NaN', 'Infinity', '-Infinity']::DOUBLE[], double_value) AS double_value,
+    edge_or(row_id, ['-9999999999999999999999999999.9999999999', '9999999999999999999999999999.9999999999', '-0.0000000001']::DECIMAL(38,10)[], decimal_38_10) AS decimal_38_10,
+    edge_or(row_id, [-99.99, 99.99, 0]::DECIMAL(4,2)[], decimal_4_2) AS decimal_4_2,
+    edge_or(row_id, ['', 'xy  ', 'abcdefghijkl'], char_value) AS char_value,
+    edge_or(row_id, ['', 'xy  ', repeat('😀', 75)], varchar_value) AS varchar_value,
+    edge_or(row_id, ['4713-01-01 (BC)', '5874897-12-31', '0001-12-31 (BC)']::DATE[], date_value) AS date_value,
+    edge_or(row_id, [0, 86399999999], time_micros) AS time_micros,
+    edge_or(row_id, [86399999999, 0, 43200000000], timetz_micros) AS timetz_micros,
+    edge_or(row_id, [57599, -57599, 0], timetz_offset) AS timetz_offset,
+    edge_or(row_id, [epoch_us(TIMESTAMP '4713-01-01 (BC) 00:00:00'), epoch_us(TIMESTAMP '294246-12-31 23:59:59.999999')]::HUGEINT[], timestamp_micros) AS timestamp_micros,
+    edge_or(row_id, [epoch_us(TIMESTAMP '4713-01-01 (BC) 00:00:00'), epoch_us(TIMESTAMP '1883-11-18 12:00:00')]::HUGEINT[], timestamptz_micros) AS timestamptz_micros,
+    edge_or(row_id, [0, -17762], timestamptz_offset) AS timestamptz_offset,
+    edge_or(row_id, ['', '00', 'ff'], varbyte_hex) AS varbyte_hex,
+    edge_or(row_id, [[]::VARCHAR[][]], super_pairs) AS super_pairs
+FROM random_values;
+
+query II
+SELECT count(*), count(DISTINCT row_id) FROM generated;
+----
+10000	10000
+
+# Float8 values that 16 significant digits do not carry, so the check needs all 17.
+query I
+SELECT count(*) FROM generated WHERE isfinite(double_value) AND printf('%.15e', double_value)::DOUBLE <> double_value;
+----
+7503
+
+# What a row holds, as DuckDB types, and the Redshift SQL literal of each value. The texts sent are
+# made once, so the TIME value is read from the text sent.
+statement ok
+CREATE TABLE inserted AS
+WITH texts AS (
+    SELECT *, time_text(time_micros) AS time_sent, time_text(timetz_micros) || offset_text(timetz_offset) AS timetz_sent,
+        make_timestamp(timestamp_micros::BIGINT) AS timestamp_value,
+        redshift_era(make_timestamp((timestamptz_micros + timestamptz_offset * 1000000)::BIGINT)::VARCHAR || offset_text(timestamptz_offset)) AS timestamptz_sent,
+        object_text(list_reverse(super_pairs)) AS super_sent
+    FROM generated
+)
+SELECT row_id, boolean_value, smallint_value, integer_value, bigint_value, real_value, double_value, decimal_38_10,
+    decimal_4_2, char_value, varchar_value, date_value, time_sent::TIME AS time_value,
+    timestamp_value, make_timestamp(timestamptz_micros::BIGINT)::TIMESTAMPTZ AS timestamptz_value,
+    unhex(varbyte_hex) AS varbyte_value,
+    '(' || array_to_string(list_transform([
+        row_id::VARCHAR, quoted(boolean_value), quoted(smallint_value), quoted(integer_value), quoted(bigint_value),
+        float_literal(real_value, 'float4'), float_literal(double_value, 'float8'), quoted(decimal_38_10), quoted(decimal_4_2),
+        quoted(char_value), utf8_literal(varchar_value), quoted(redshift_era(date_value::VARCHAR)), quoted(time_sent),
+        quoted(timetz_sent), quoted(redshift_era(timestamp_value::VARCHAR)), quoted(timestamptz_sent),
+        'FROM_HEX(' || quoted(varbyte_hex) || ')', 'JSON_PARSE(' || utf8_literal(super_sent) || ')'],
+        lambda literal: coalesce(literal, 'NULL')), ', ') || ')' AS row_sql
+FROM texts;
+
+# What the client must return: the inserted value, except where Redshift or the extension defines
+# another. A float4 is the value its 8 significant digits denote, a CHAR lands without its trailing
+# blanks, a TIMETZ is stored moved to +00, and a SUPER object's keys come in any order.
+statement ok
+CREATE TABLE expected AS
+SELECT row_id, i.boolean_value, i.smallint_value, i.integer_value, i.bigint_value,
+    CASE WHEN isfinite(i.real_value) THEN printf('%.7e', i.real_value::DOUBLE)::FLOAT ELSE i.real_value END AS real_value,
+    i.double_value, i.decimal_38_10, i.decimal_4_2, rtrim(i.char_value, ' ') AS char_value, i.varchar_value, i.date_value,
+    i.time_value, (time_text(((g.timetz_micros - g.timetz_offset * 1000000) % 86400000000 + 86400000000) % 86400000000) || '+00')::TIMETZ AS timetz_value,
+    i.timestamp_value, i.timestamptz_value, i.varbyte_value, object_text(g.super_pairs) AS super_value
+FROM inserted i JOIN generated g USING (row_id);
+
+# The float4 values whose 8 digits denote another float4: the loss docs/data-types.md states.
+query I
+SELECT count(*) FROM generated JOIN expected USING (row_id) WHERE generated.real_value <> expected.real_value;
+----
+361
+
+# The temporary table lives in the attached connection's session.
+statement ok
+FROM redshift_query('rs', 'CREATE TEMP TABLE inserted_values (row_id INTEGER, boolean_value BOOLEAN, smallint_value SMALLINT, integer_value INTEGER, bigint_value BIGINT, real_value REAL, double_value DOUBLE PRECISION, decimal_38_10 NUMERIC(38,10), decimal_4_2 NUMERIC(4,2), char_value CHAR(12), varchar_value VARCHAR(300), date_value DATE, time_value TIME, timetz_value TIMETZ, timestamp_value TIMESTAMP, timestamptz_value TIMESTAMPTZ, varbyte_value VARBYTE(64), super_value SUPER)');
+
+# 1,000 rows a statement, well under Redshift's 16 MB statement limit.
+loop chunk 0 10
+
+statement ok
+SET VARIABLE insert_rows = (SELECT 'INSERT INTO inserted_values VALUES ' || string_agg(row_sql, ', ' ORDER BY row_id) FROM inserted WHERE row_id // 1000 = {chunk});
+
+query I
+FROM redshift_query('rs', getvariable('insert_rows'));
+----
+1000
+
+endloop
+
+# A result is bound over a row array only when every column in it is bounded, so the bounded columns
+# are read alone, and VARBYTE and SUPER, long, beside the row number with SQLGetData.
+statement ok
+CREATE TABLE bounded_read AS
+FROM redshift_query('rs', 'SELECT row_id, boolean_value, smallint_value, integer_value, bigint_value, real_value, double_value, decimal_38_10, decimal_4_2, char_value, varchar_value, date_value, time_value, timetz_value, timestamp_value, timestamptz_value FROM inserted_values');
+
+statement ok
+CREATE TABLE long_read AS FROM redshift_query('rs', 'SELECT row_id, varbyte_value, super_value FROM inserted_values');
+
+statement ok
+CREATE TABLE read_back AS FROM bounded_read FULL JOIN long_read USING (row_id);
+
+# The columns read back have the expected types, so no comparison below widens one side to match the
+# other (a DECIMAL read as DOUBLE would compare equal after rounding).
+query I
+SELECT count(*) FROM (DESCRIBE read_back) r FULL JOIN (DESCRIBE expected) e USING (column_name)
+WHERE column_name <> 'row_id' AND r.column_type IS DISTINCT FROM e.column_type;
+----
+0
+
+# Every row read back was generated, and every row generated was read back: a count and the first row
+# that differs (expects none).
+query II
+SELECT count(*), min(row_id) FROM (FROM exact_rows('read_back') EXCEPT ALL FROM exact_rows('expected'));
+----
+0	NULL
+
+query II
+SELECT count(*), min(row_id) FROM (FROM exact_rows('expected') EXCEPT ALL FROM exact_rows('read_back'));
+----
+0	NULL
+
+# The key sort decodes JSON escapes, so a SUPER that arrived with its UTF-8 escaped would still compare
+# equal. The values hold no backslash, so none may arrive.
+query I
+SELECT count(*) FROM read_back WHERE contains(super_value, chr(92));
+----
+0
+
+# A result with no float column runs with SQLExecDirect, where a date before year 1 arrives in its
+# astronomical form, so the bounded columns but the floats are read that way too, and compared the
+# same way.
+statement ok
+CREATE TABLE direct_read AS
+FROM redshift_query('rs', 'SELECT row_id, boolean_value, smallint_value, integer_value, bigint_value, decimal_38_10, decimal_4_2, char_value, varchar_value, date_value, time_value, timetz_value, timestamp_value, timestamptz_value FROM inserted_values');
+
+statement ok
+CREATE TABLE expected_direct AS SELECT * EXCLUDE (real_value, double_value, varbyte_value, super_value) FROM expected;
+
+query I
+SELECT count(*) FROM (DESCRIBE direct_read) r FULL JOIN (DESCRIBE expected_direct) e USING (column_name)
+WHERE column_name <> 'row_id' AND r.column_type IS DISTINCT FROM e.column_type;
+----
+0
+
+query II
+SELECT count(*), min(row_id) FROM (FROM direct_read EXCEPT ALL FROM expected_direct);
+----
+0	NULL
+
+query II
+SELECT count(*), min(row_id) FROM (FROM expected_direct EXCEPT ALL FROM direct_read);
+----
+0	NULL
+
+# Redshift's own text of the same table, read as the same types. BOOLEAN has no cast to VARCHAR,
+# VARBYTE's fails, and SUPER's is NULL but for a string, so those take ::INT, TO_HEX and
+# JSON_SERIALIZE, which writes a NULL as the text null.
+statement ok
+CREATE TABLE as_text AS
+SELECT row_id, boolean_value::INTEGER::BOOLEAN AS boolean_value, smallint_value::SMALLINT AS smallint_value,
+    integer_value::INTEGER AS integer_value, bigint_value::BIGINT AS bigint_value, real_value::FLOAT AS real_value,
+    double_value::DOUBLE AS double_value, decimal_38_10::DECIMAL(38,10) AS decimal_38_10, decimal_4_2::DECIMAL(4,2) AS decimal_4_2,
+    char_value, varchar_value, duckdb_era(date_value)::DATE AS date_value, time_value::TIME AS time_value,
+    timetz_value::TIMETZ AS timetz_value, duckdb_era(timestamp_value)::TIMESTAMP AS timestamp_value,
+    duckdb_era(timestamptz_value)::TIMESTAMPTZ AS timestamptz_value, unhex(varbyte_value) AS varbyte_value, super_value
+FROM redshift_query('rs', 'SELECT row_id, boolean_value::INT::VARCHAR AS boolean_value, smallint_value::VARCHAR AS smallint_value, integer_value::VARCHAR AS integer_value, bigint_value::VARCHAR AS bigint_value, real_value::VARCHAR AS real_value, double_value::VARCHAR AS double_value, decimal_38_10::VARCHAR AS decimal_38_10, decimal_4_2::VARCHAR AS decimal_4_2, char_value::VARCHAR AS char_value, varchar_value::VARCHAR AS varchar_value, date_value::VARCHAR AS date_value, time_value::VARCHAR AS time_value, timetz_value::VARCHAR AS timetz_value, timestamp_value::VARCHAR AS timestamp_value, timestamptz_value::VARCHAR AS timestamptz_value, TO_HEX(varbyte_value) AS varbyte_value, CASE WHEN super_value IS NOT NULL THEN JSON_SERIALIZE(super_value) END AS super_value FROM inserted_values');
+
+query II
+SELECT count(*), min(row_id) FROM (FROM exact_rows('read_back') EXCEPT ALL FROM exact_rows('as_text'));
+----
+0	NULL
+
+query II
+SELECT count(*), min(row_id) FROM (FROM exact_rows('as_text') EXCEPT ALL FROM exact_rows('read_back'));
+----
+0	NULL

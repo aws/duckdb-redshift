@@ -1,0 +1,285 @@
+# name: test/mock/statement_failures.test
+# description: an Execute or NextBatch failure is never replayed; a lost connection is reported and replaced, a statement failure keeps the session unless the client reports it unusable
+# group: [mock]
+
+require-env REDSHIFT_TEST_CLIENT mock
+
+require redshift
+
+# lose=prepare and lose=execute lose the connection while Execute prepares the statement and after
+# it has sent it; lose=fetch:N loses it once NextBatch has returned N rows. fail=execute and
+# fail=fetch:N fail the statement on a connection that stays usable, as an ExceptionType::EXECUTOR
+# failure carrying the given SQLSTATE. Opens, closes and executions are counted from the mock's
+# log lines. The mock also logs a result that outlives its connection, which the client does not
+# allow, so a failed result must go first.
+statement ok
+CALL enable_logging(level = 'debug');
+
+statement ok
+CREATE MACRO mock_opened() AS (SELECT count(*) FROM duckdb_logs WHERE message LIKE 'redshift mock: opened a connection to %');
+
+statement ok
+CREATE MACRO mock_closed() AS (SELECT count(*) FROM duckdb_logs WHERE message LIKE 'redshift mock: closed a connection to %');
+
+statement ok
+CREATE MACRO mock_executed() AS (SELECT count(*) FROM duckdb_logs WHERE message LIKE 'redshift mock: executed a statement on %');
+
+statement ok
+CREATE MACRO results_outlived() AS (SELECT count(*) FROM duckdb_logs WHERE message LIKE 'redshift mock: a result outlived its connection%');
+
+statement ok
+ATTACH '' AS rs (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+# ---------------------------------------------------------------------------
+# A connection lost while Execute runs the statement: the statement may have run, so it is not run
+# again, and the message claims no outcome. This is the pair's first statement:
+# The client's latch was set when it sent it, so the message also says the session's state may be
+# gone.
+# ---------------------------------------------------------------------------
+statement error
+SELECT * FROM redshift_query('rs', 'lose=execute rows=1');
+----
+<REGEX>:IO Error: redshift_query: the Redshift connection of attach handle "rs" was lost while executing the statement, and the statement was not retried\. The statement may already have applied its effects on Redshift; check them before re-running it\. The session it carried may have held state, which may now be lost: the next redshift_query on this handle from this DuckDB connection starts a new, empty Redshift session\. The client reported: redshift mock: lost the connection to region us-east-1, workgroup test-wg, account 012345678901 after sending the statement\n
+
+# Sent once, never again; the dead connection closed.
+query III
+SELECT mock_opened(), mock_closed(), mock_executed();
+----
+1	1	1
+
+# The loss is reported once: the next call opens a new session, silently.
+query I
+SELECT c0 FROM redshift_query('rs', 'rows=1 types=int8');
+----
+0
+
+query III
+SELECT mock_opened(), mock_closed(), mock_executed();
+----
+2	1	2
+
+# ---------------------------------------------------------------------------
+# Lost while Execute prepares the statement, on a connection that has only described one, so its
+# session held no state and nothing says state was lost. The extension cannot tell that the statement never
+# ran, so the message is the same about the statement.
+# ---------------------------------------------------------------------------
+statement ok
+ATTACH '' AS rs_fresh (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+statement error
+SELECT * FROM redshift_query('rs_fresh', 'lose=prepare rows=1');
+----
+<REGEX>:IO Error: redshift_query: the Redshift connection of attach handle "rs_fresh" was lost while executing the statement, and the statement was not retried\. The statement may already have applied its effects on Redshift; check them before re-running it\. The client reported: redshift mock: lost the connection to region us-east-1, workgroup test-wg, account 012345678901 while preparing the statement\n
+
+query III
+SELECT mock_opened(), mock_closed(), mock_executed();
+----
+3	2	2
+
+# ---------------------------------------------------------------------------
+# Lost while reading the result: the statement ran, so it is not run again. The message counts the
+# rows read from Redshift.
+# ---------------------------------------------------------------------------
+statement error
+SELECT * FROM redshift_query('rs', 'lose=fetch:0 rows=3');
+----
+<REGEX>:IO Error: redshift_query: the Redshift connection of attach handle "rs" was lost while reading the statement's result, before any row arrived, and the statement was not retried\. The statement may already have applied its effects on Redshift; check them before re-running it\. The session it carried may have held state, which may now be lost: .* The client reported: redshift mock: lost the connection to region us-east-1, workgroup test-wg, account 012345678901 while reading the result\n
+
+statement error
+SELECT * FROM redshift_query('rs', 'lose=fetch:1 rows=3');
+----
+IO Error: redshift_query: the Redshift connection of attach handle "rs" was lost after 1 row of the statement's result had been read from Redshift, so the result may be incomplete, and the statement was not retried.
+
+statement error
+SELECT * FROM redshift_query('rs', 'lose=fetch:3 rows=10');
+----
+IO Error: redshift_query: the Redshift connection of attach handle "rs" was lost after 3 rows of the statement's result had been read from Redshift, so the result may be incomplete, and the statement was not retried.
+
+# Each ran once and closed its connection when it was lost, after its result.
+query IIII
+SELECT mock_opened(), mock_closed(), mock_executed(), results_outlived();
+----
+5	5	5	0
+
+# More than one chunk already went to DuckDB, and the statement still fails as a whole.
+statement error
+CREATE TABLE copied AS SELECT * FROM redshift_query('rs', 'lose=fetch:5000 rows=10000 types=int8');
+----
+was lost after 5000 rows of the statement's result had been read from Redshift, so the result may be incomplete
+
+statement error
+SELECT count(*) FROM copied;
+----
+Table with name copied does not exist
+
+# A lost connection gets no aborted-transaction guidance, whatever its SQLSTATE: its session, and
+# any transaction with it, is gone. The message ends with the client's. Redshift gives 25P02 when it
+# refuses to prepare a statement, so the loss comes while Execute prepares this one.
+statement error
+SELECT * FROM redshift_query('rs', 'lose=prepare sqlstates=25P02 rows=1');
+----
+<REGEX>:IO Error: redshift_query: the Redshift connection of attach handle "rs" was lost while executing the statement, .* The client reported: redshift mock: lost the connection to region us-east-1, workgroup test-wg, account 012345678901 while preparing the statement\nSQLSTATE: 25P02\n
+
+query II
+SELECT mock_closed(), results_outlived();
+----
+7	0
+
+# ---------------------------------------------------------------------------
+# A loss ends only its own DuckDB connection's session on the handle: another's keeps its own.
+# ---------------------------------------------------------------------------
+statement ok con2
+SELECT * FROM redshift_query('rs', 'rows=1');
+
+statement error
+SELECT * FROM redshift_query('rs', 'lose=execute rows=1');
+----
+was lost while executing the statement
+
+statement ok con2
+SELECT * FROM redshift_query('rs', 'rows=1');
+
+query II
+SELECT mock_opened(), mock_closed();
+----
+9	8
+
+# ---------------------------------------------------------------------------
+# A prepared statement whose pair lost its connection since it was prepared runs on a new session.
+# ---------------------------------------------------------------------------
+statement ok
+PREPARE later AS SELECT c0 FROM redshift_query('rs', 'rows=1 types=int8');
+
+statement error
+SELECT * FROM redshift_query('rs', 'lose=execute rows=1');
+----
+was lost while executing the statement
+
+query I
+EXECUTE later;
+----
+0
+
+query II
+SELECT mock_opened(), mock_closed();
+----
+11	9
+
+# ---------------------------------------------------------------------------
+# A statement failure while it runs keeps the session: the error passes through with its type,
+# message and SQLSTATE, the statement ran once, and the next call reuses the connection.
+# For a statement with rows and one without, at Execute, and after some rows
+# at NextBatch.
+# ---------------------------------------------------------------------------
+query I
+SELECT mock_executed();
+----
+11
+
+statement error
+SELECT * FROM redshift_query('rs', 'fail=execute sqlstates=22012 rows=3');
+----
+<REGEX>:Executor Error: redshift mock: the statement failed while it ran\nSQLSTATE: 22012\n
+
+statement error
+SELECT * FROM redshift_query('rs', 'fail=execute sqlstates=HY000,57014 norows');
+----
+<REGEX>:Executor Error: redshift mock: the statement failed while it ran\nSQLSTATE: 57014\n
+
+statement error
+SELECT * FROM redshift_query('rs', 'fail=fetch:3 sqlstates=57014 rows=10');
+----
+<REGEX>:Executor Error: redshift mock: the statement failed while it ran\nSQLSTATE: 57014\n
+
+query I
+SELECT c0 FROM redshift_query('rs', 'rows=1 types=int8');
+----
+0
+
+query III
+SELECT mock_opened(), mock_closed(), mock_executed();
+----
+11	9	15
+
+# ---------------------------------------------------------------------------
+# A session whose only statement had no result set may hold state too, whether that statement
+# succeeded or failed, so a later loss says the state may be lost. The later loss comes while
+# Execute prepares its statement, which sends nothing, so only the earlier statement can have set
+# the latch. It says so once: the next call opens a new session with no second report.
+# Each uses a handle of its own, so its connection's only earlier statement is
+# that one.
+# ---------------------------------------------------------------------------
+statement ok
+ATTACH '' AS rs_succeeded (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+query I
+SELECT rowcount FROM redshift_query('rs_succeeded', 'norows rowcount=4');
+----
+4
+
+statement error
+SELECT * FROM redshift_query('rs_succeeded', 'lose=prepare rows=1');
+----
+The session it carried may have held state, which may now be lost
+
+query I
+SELECT count(*) FROM redshift_query('rs_succeeded', 'rows=2');
+----
+2
+
+statement ok
+ATTACH '' AS rs_failed (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+statement error
+SELECT * FROM redshift_query('rs_failed', 'fail=execute sqlstates=22012 norows');
+----
+SQLSTATE: 22012
+
+statement error
+SELECT * FROM redshift_query('rs_failed', 'lose=prepare rows=1');
+----
+The session it carried may have held state, which may now be lost
+
+query I
+SELECT count(*) FROM redshift_query('rs_failed', 'rows=2');
+----
+2
+
+query IIII
+SELECT mock_opened(), mock_closed(), mock_executed(), results_outlived();
+----
+15	11	19	0
+
+# ---------------------------------------------------------------------------
+# A refusal the client reports as leaving the session unusable (unusable, as it reports Redshift's XX000
+# "Internal Service Error") discards the session: the statement fails saying so, nothing is tried again,
+# and the next call opens a new session. The session ran nothing, so the message does not say what was lost.
+# ---------------------------------------------------------------------------
+statement ok
+ATTACH '' AS rs_unusable (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+statement error
+SELECT * FROM redshift_query('rs_unusable', 'error=Internal_Service_Error sqlstates=XX000 unusable');
+----
+Binder Error: redshift_query: Redshift session error on attach handle "rs_unusable": the session cannot be used any more. The extension discarded it; the next redshift_query on "rs_unusable" opens a new session. The statement was not run on Redshift. The client reported: Redshift rejected the statement: Internal_Service_Error
+
+query II
+SELECT mock_opened(), mock_closed();
+----
+16	12
+
+query I
+SELECT count(*) FROM redshift_query('rs_unusable', 'rows=2');
+----
+2
+
+query II
+SELECT mock_opened(), mock_closed();
+----
+17	12
+
+# A failing query whose message only looks like JSON keeps its own error, with the extension loaded.
+statement error
+SELECT error('{x');
+----
+Invalid Input Error: {x

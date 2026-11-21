@@ -1,0 +1,13 @@
+# The libraries the Linux driver may name in DT_NEEDED: the glibc libraries and each architecture's
+# dynamic loader, and libkeyutils.so.1, the one dependency outside the base system
+# (policy/host-prerequisites.txt). A driver that needs any other library fails verification until a
+# reviewed edit adds it here. One file name per line.
+libc.so.6
+libdl.so.2
+libm.so.6
+libpthread.so.0
+libresolv.so.2
+librt.so.1
+ld-linux-x86-64.so.2
+ld-linux-aarch64.so.1
+libkeyutils.so.1

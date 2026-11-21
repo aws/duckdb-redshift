@@ -1,0 +1,236 @@
+# name: test/mock/describe_recovery.test
+# description: a connection lost during Describe is replaced once, silently, only when its session held no state
+# group: [mock]
+
+require-env REDSHIFT_TEST_CLIENT mock
+
+require redshift
+
+# The mock's SessionHoldsState() follows the real client's latch: false while a connection has
+# only described statements, true once one has executed. lose=describe
+# makes Describe find the connection lost, on a connection that has served a call before; a
+# connection opened for the call describes as usual. Opens, closes, Describe calls and executions
+# are counted from the mock's log lines, and the extension's own recovery lines are read the same
+# way.
+statement ok
+CALL enable_logging(level = 'debug');
+
+statement ok
+CREATE MACRO mock_opened() AS (SELECT count(*) FROM duckdb_logs WHERE message LIKE 'redshift mock: opened a connection to %');
+
+statement ok
+CREATE MACRO mock_closed() AS (SELECT count(*) FROM duckdb_logs WHERE message LIKE 'redshift mock: closed a connection to %');
+
+statement ok
+CREATE MACRO mock_described() AS (SELECT count(*) FROM duckdb_logs WHERE message LIKE 'redshift mock: described a statement on %');
+
+statement ok
+CREATE MACRO mock_executed() AS (SELECT count(*) FROM duckdb_logs WHERE message LIKE 'redshift mock: executed a statement on %');
+
+statement ok
+CREATE MACRO replacement_notices() AS (SELECT count(*) FROM duckdb_logs WHERE message LIKE 'redshift_query: the Redshift connection of attach handle % was lost during Describe%');
+
+# The timing lines for `handle` with exactly `fields`, a regular expression.
+statement ok
+CREATE MACRO timing_lines(handle, fields) AS (SELECT count(*) FROM duckdb_logs WHERE regexp_full_match(message, 'redshift_query: Describe lost the Redshift connection of attach handle "' || handle || '"; bind timings: ' || fields));
+
+statement ok
+ATTACH '' AS rs (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+# ---------------------------------------------------------------------------
+# A refusal and a user error from Describe are not losses: the pair keeps its connection, and
+# nothing is replaced. Neither runs a statement, so the session still holds no
+# state.
+# ---------------------------------------------------------------------------
+statement ok
+DESCRIBE SELECT * FROM redshift_query('rs', 'rows=1 types=int8');
+
+statement error
+SELECT * FROM redshift_query('rs', 'error=relation_t_does_not_exist');
+----
+Binder Error: Redshift rejected the statement: relation_t_does_not_exist
+
+statement error
+SELECT * FROM redshift_query('rs', 'rows=-1');
+----
+Invalid Input Error: redshift mock: rows must be a non-negative integer, got "-1"
+
+query II
+SELECT mock_opened(), mock_closed();
+----
+1	0
+
+# ---------------------------------------------------------------------------
+# While the session holds no state, a lost Describe is replaced once and the statement runs on the
+# replacement, with no SQL error or warning.
+# ---------------------------------------------------------------------------
+query I
+SELECT c0 FROM redshift_query('rs', 'lose=describe rows=1 types=int8');
+----
+0
+
+# The lost connection closed, a replacement opened, described the statement and ran it once.
+query IIII
+SELECT mock_opened(), mock_closed(), mock_described(), mock_executed();
+----
+2	1	2	1
+
+# Before the replacement opened, a log line said why, that this is attempt 1 of 1, and that it may
+# take another connection-open budget.
+query I
+SELECT message FROM duckdb_logs WHERE message LIKE 'redshift_query: the Redshift connection of attach handle % was lost during Describe%';
+----
+redshift_query: the Redshift connection of attach handle "rs" was lost during Describe, which runs no statement, and its session held no state, so a replacement connection is being opened to describe the statement again: replacement attempt 1/1. Opening it may take another complete connection-open budget.
+
+# Once the Describe finished, a log line gave each phase's time. The pair's connection was open
+# already, so there is no initial open.
+query I
+SELECT timing_lines('rs', 'failed_describe_us=[0-9]+ replacement_open_us=[0-9]+ retried_describe_us=[0-9]+ total_us=[0-9]+ outcome=recovered');
+----
+1
+
+# Both are info-level lines of DuckDB's default log type.
+query II
+SELECT DISTINCT log_level, type = '' FROM duckdb_logs WHERE message LIKE 'redshift_query: %';
+----
+INFO	true
+
+# The replacement ran a statement above, so its session may hold state: a lost Describe on it now
+# fails, without a replacement, saying the state may have been lost and that the statement did not
+# run.
+statement error
+SELECT * FROM redshift_query('rs', 'lose=describe rows=1');
+----
+IO Error: redshift_query: the Redshift connection of attach handle "rs" was lost while describing the statement, so the statement was not run on Redshift. The session it carried may have held state, which may now be lost: the next redshift_query on this handle from this DuckDB connection starts a new, empty Redshift session. The client reported: redshift mock: lost the connection to region us-east-1, workgroup test-wg, account 012345678901 during Describe
+
+query IIIII
+SELECT mock_opened(), mock_closed(), mock_described(), mock_executed(), replacement_notices();
+----
+2	2	2	1	1
+
+query I
+SELECT timing_lines('rs', 'failed_describe_us=[0-9]+ total_us=[0-9]+ outcome=failed');
+----
+1
+
+# The loss is reported once. The next call opens a new session silently, and that connection starts
+# from the client's fresh answer: having only described, it is replaced silently again.
+statement ok
+DESCRIBE SELECT * FROM redshift_query('rs', 'rows=1');
+
+query II
+SELECT mock_opened(), mock_closed();
+----
+3	2
+
+query I
+SELECT count(*) FROM redshift_query('rs', 'lose=describe rows=2');
+----
+2
+
+query III
+SELECT mock_opened(), mock_closed(), replacement_notices();
+----
+4	3	2
+
+# ---------------------------------------------------------------------------
+# A replacement that refuses the statement is a live connection: the refusal passes through, and the
+# pair keeps the replacement. A replacement is a new session, in autocommit, so no aborted
+# transaction can be what it refuses.
+# ---------------------------------------------------------------------------
+statement ok
+ATTACH '' AS rs_refused (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+statement ok
+DESCRIBE SELECT * FROM redshift_query('rs_refused', 'rows=1');
+
+statement error
+SELECT * FROM redshift_query('rs_refused', 'lose=describe error=refused');
+----
+Binder Error: Redshift rejected the statement: refused
+
+query I
+SELECT timing_lines('rs_refused', 'failed_describe_us=[0-9]+ replacement_open_us=[0-9]+ retried_describe_us=[0-9]+ total_us=[0-9]+ outcome=failed');
+----
+1
+
+# The replacement stayed: the next call opens nothing.
+query I
+SELECT count(*) FROM redshift_query('rs_refused', 'rows=1');
+----
+1
+
+query III
+SELECT mock_opened(), mock_closed(), replacement_notices();
+----
+6	4	3
+
+# ---------------------------------------------------------------------------
+# Whatever ran before, a session that may hold state is never replaced silently: after a statement
+# without a result set, and after one that failed while it ran, which may have left state too.
+# ---------------------------------------------------------------------------
+statement ok
+ATTACH '' AS rs_norows (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+query I
+SELECT rowcount FROM redshift_query('rs_norows', 'norows rowcount=1');
+----
+1
+
+statement error
+SELECT * FROM redshift_query('rs_norows', 'lose=describe rows=1');
+----
+was lost while describing the statement, so the statement was not run on Redshift. The session it carried may have held state, which may now be lost
+
+statement ok
+ATTACH '' AS rs_failed (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+statement error
+SELECT * FROM redshift_query('rs_failed', 'fail=execute sqlstates=22012 rows=1');
+----
+Executor Error: redshift mock: the statement failed while it ran
+
+statement error
+SELECT * FROM redshift_query('rs_failed', 'lose=describe rows=1');
+----
+was lost while describing the statement, so the statement was not run on Redshift. The session it carried may have held state, which may now be lost
+
+query I
+SELECT replacement_notices();
+----
+3
+
+# ---------------------------------------------------------------------------
+# One replacement at most: when its Describe loses the connection too, the bind fails and nothing
+# runs. lose=describe:any loses every connection's Describe, the replacement's included. This bind
+# also opened the pair's first connection, so its timings start with that open: the ATTACH runs on
+# another DuckDB connection, whose session it opens.
+# ---------------------------------------------------------------------------
+statement ok con2
+ATTACH '' AS rs_twice (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+statement error
+SELECT * FROM redshift_query('rs_twice', 'lose=describe:any rows=1');
+----
+IO Error: redshift_query: the Redshift connection of attach handle "rs_twice" was lost while describing the statement, and so was the replacement connection opened to describe it again, so the statement was not run on Redshift. The client reported: redshift mock: lost the connection to region us-east-1, workgroup test-wg, account 012345678901 during Describe
+
+query I
+SELECT timing_lines('rs_twice', 'initial_open_us=[0-9]+ failed_describe_us=[0-9]+ replacement_open_us=[0-9]+ retried_describe_us=[0-9]+ total_us=[0-9]+ outcome=failed');
+----
+1
+
+# Both lost connections closed; nothing executed. The next call opens a new connection.
+query IIII
+SELECT mock_opened(), mock_closed(), mock_executed(), replacement_notices();
+----
+11	8	5	4
+
+query I
+SELECT c0 FROM redshift_query('rs_twice', 'rows=1 types=int8');
+----
+0
+
+query II
+SELECT mock_opened(), mock_closed();
+----
+12	8

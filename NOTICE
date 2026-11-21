@@ -1,0 +1,10 @@
+Amazon Redshift extension for DuckDB
+Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+
+This is an extension for DuckDB (https://duckdb.org). It is not part of DuckDB and is not
+maintained by the DuckDB Foundation or DuckDB Labs.
+
+This project includes third-party software, and its binary builds contain DuckDB code, with code
+from libraries that DuckDB bundles, and the Amazon Redshift ODBC driver with the software the driver
+includes. THIRD_PARTY_LICENSES lists each component with its licence and the files that hold its
+licence texts and notices.

@@ -1,0 +1,33 @@
+# Every file of the Amazon Redshift ODBC 2.3.1.0 MSI, from msi.py record: its File key, long name (a
+# space written %20) and Directory key, marked driver, library or leave. msi.py check fails an MSI
+# that holds a file not listed here or lacks one listed. The driver and library files are the
+# Windows set the lock pins; the rest are left in the MSI: the samples, the setup tools, the
+# configuration and trust files, the notices (the release tag's copies ship, not these), and the
+# Kerberos DLLs only the GSS path loads.
+# <driver|library|leave> <File key> <long name> <Directory key>
+leave    rsodbcsql.exe  rsodbcsql.exe  BASEDIR
+leave    amazon.redshiftodbc.ini  amazon.redshiftodbc.ini  BINDIR
+leave    filWLU22ajOeU64uEeHvhKccDJ9Y_k  connect.c  CONNECTDIR
+leave    filX52leSnNOh6iAP6mzmnBj91vsRg  connect.rc  CONNECTDIR
+leave    filNTZpMRKSqNFFa24Th06rBeV8a_w  resource.h  CONNECTDIR
+leave    redshift.ico  redshift.ico  CONNECTDIR
+leave    filKFYGCAfSt7eLvV3afkO1Q6jfM3A  connect.sln  CONNECTDIR
+leave    filTntSSH8kfcNw8ZlpcHzFmjTEaY8  connect.vcxproj  CONNECTDIR
+leave    filbk3sebYuDBV.QbvWQ9Z4g0UdTeM  connect.exe  CONNECTDIR
+leave    LICENSE.txt.5757C18B_A2EA_4593_B468_74DA3D7231D4  LICENSE.txt  BINDIR.5757C18B_A2EA_4593_B468_74DA3D7231D4
+leave    NOTICE.txt.5757C18B_A2EA_4593_B468_74DA3D7231D4  NOTICE.txt  BINDIR.5757C18B_A2EA_4593_B468_74DA3D7231D4
+leave    THIRD_PARTY_LICENSES.txt.5757C18B_A2EA_4593_B468_74DA3D7231D4  THIRD_PARTY_LICENSES.txt  BINDIR.5757C18B_A2EA_4593_B468_74DA3D7231D4
+library  crypto.dll.5757C18B_A2EA_4593_B468_74DA3D7231D4  crypto.dll  BINDIR.5757C18B_A2EA_4593_B468_74DA3D7231D4
+leave    root.crt.5757C18B_A2EA_4593_B468_74DA3D7231D4  root.crt  BINDIR.5757C18B_A2EA_4593_B468_74DA3D7231D4
+library  ssl.dll.5757C18B_A2EA_4593_B468_74DA3D7231D4  ssl.dll  BINDIR.5757C18B_A2EA_4593_B468_74DA3D7231D4
+driver   rsodbc.dll.5757C18B_A2EA_4593_B468_74DA3D7231D4  rsodbc.dll  BINDIR.5757C18B_A2EA_4593_B468_74DA3D7231D4
+leave    rsodbcsetup.dll.5757C18B_A2EA_4593_B468_74DA3D7231D4  rsodbcsetup.dll  BINDIR.5757C18B_A2EA_4593_B468_74DA3D7231D4
+library  gssapi64.dll.5757C18B_A2EA_4593_B468_74DA3D7231D4  gssapi64.dll  BINDIR.5757C18B_A2EA_4593_B468_74DA3D7231D4
+library  krb5_64.dll.5757C18B_A2EA_4593_B468_74DA3D7231D4  krb5_64.dll  BINDIR.5757C18B_A2EA_4593_B468_74DA3D7231D4
+library  k5sprt64.dll.5757C18B_A2EA_4593_B468_74DA3D7231D4  k5sprt64.dll  BINDIR.5757C18B_A2EA_4593_B468_74DA3D7231D4
+library  wshelp64.dll.5757C18B_A2EA_4593_B468_74DA3D7231D4  wshelp64.dll  BINDIR.5757C18B_A2EA_4593_B468_74DA3D7231D4
+library  comerr64.dll.5757C18B_A2EA_4593_B468_74DA3D7231D4  comerr64.dll  BINDIR.5757C18B_A2EA_4593_B468_74DA3D7231D4
+library  msvcr100.dll.5757C18B_A2EA_4593_B468_74DA3D7231D4  msvcr100.dll  BINDIR.5757C18B_A2EA_4593_B468_74DA3D7231D4
+leave    krbcc64.dll.5757C18B_A2EA_4593_B468_74DA3D7231D4  krbcc64.dll  BINDIR.5757C18B_A2EA_4593_B468_74DA3D7231D4
+leave    leashw64.dll.5757C18B_A2EA_4593_B468_74DA3D7231D4  leashw64.dll  BINDIR.5757C18B_A2EA_4593_B468_74DA3D7231D4
+leave    xpprof64.dll.5757C18B_A2EA_4593_B468_74DA3D7231D4  xpprof64.dll  BINDIR.5757C18B_A2EA_4593_B468_74DA3D7231D4

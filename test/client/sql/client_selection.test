@@ -1,0 +1,19 @@
+# name: test/client/sql/client_selection.test
+# description: runs only against the ODBC client build; proves test selection by REDSHIFT_TEST_CLIENT
+# group: [sql]
+
+# This file gives `make test_client` an offline test to select, and the mock build demonstrably
+# skips it: `make test` reports it as skipped. Nothing here opens a connection, so it passes
+# whichever driver the build carries; the NOT_BUILT failure is checked in C++, by
+# `test/client/odbc/shipped_driver_source_test.cpp`, in the build without a driver.
+require-env REDSHIFT_TEST_CLIENT odbc
+
+require redshift
+
+statement ok
+SELECT 1
+
+query I
+SELECT count(*) FROM duckdb_functions() WHERE function_name = 'redshift_query'
+----
+1

@@ -1,0 +1,26 @@
+# name: test/client/sql/trust_unrelated_ca.test
+# description: live: with SSL_CERT_FILE naming a CA that signs no endpoint, the connect fails as a certificate failure
+# group: [sql]
+
+# Live only, in a process whose SSL_CERT_FILE names a CA that signed none of the endpoints, with
+# REDSHIFT_TEST_LIVE_UNRELATED_CA_REGION naming the live region (test/README.md, "Live variables").
+require-env REDSHIFT_TEST_CLIENT odbc
+
+require-env REDSHIFT_TEST_LIVE_UNRELATED_CA_REGION
+
+require-env REDSHIFT_TEST_LIVE_WORKGROUP
+
+require-env REDSHIFT_TEST_LIVE_ACCOUNT_ID
+
+# On Windows the control plane verifies against the Windows store whatever SSL_CERT_FILE says, so
+# there the database hop fails instead, with Windows' hint, and this case does not run there.
+require notwindows
+
+require redshift
+
+# The control plane's call fails first, with curl's error 60, which the certificate rule reads. The
+# runner adds a newline before it full-matches.
+statement error
+ATTACH '' AS rs (TYPE redshift, REGION '{REDSHIFT_TEST_LIVE_UNRELATED_CA_REGION}', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP '{REDSHIFT_TEST_LIVE_WORKGROUP}', ACCOUNT_ID '{REDSHIFT_TEST_LIVE_ACCOUNT_ID}');
+----
+<REGEX>:(?s)IO Error: Cannot attach rs: Could not connect to Redshift at [^\n]*: the server's TLS certificate could not be verified\.\nCheck the trusted CA certificates, from SSL_CERT_FILE or the system store, and the network path to the Redshift host\. Verification cannot be turned off\.\nSQLSTATE: HY000\n.*

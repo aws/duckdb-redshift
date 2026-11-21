@@ -1,0 +1,5 @@
+# The driver's path in the Linux package: verify-release.sh takes only the member at this path, by
+# the member-checked extraction fetch-driver.sh also uses, and prints it in the lock row. The path
+# follows the lock's grammar (./ and segments from A-Za-z0-9._+-). The same on both architectures
+# for 2.3.1.0; a changed path is a reviewed edit to this file.
+./opt/amazon/redshiftodbcx64/librsodbc64.so

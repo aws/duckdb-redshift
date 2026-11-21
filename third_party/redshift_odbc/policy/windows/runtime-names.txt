@@ -1,0 +1,52 @@
+# The DLL names each file of the Windows set holds for run-time loads: every whole string that ends
+# in .dll or equals a base name the policy knows, outside the export name, the version resource, the
+# certificate table, the PDB path and the import names. Each file's rows must equal what it holds,
+# ignoring case, so a new LoadLibrary target fails verification until a reviewed edit here. One row
+# per file and string: <file> <string>, the string the rest of the row. python3 -I
+# tools/lib/windows_policy.py rows <set-dir> <driver> policy runtime-names prints them.
+crypto.dll  advapi32
+crypto.dll  kernel32
+crypto.dll  mscoree.dll
+crypto.dll  ntdll
+crypto.dll  user32
+crypto.dll  version
+gssapi64.dll  leashw64.dll
+k5sprt64.dll  .dll
+krb5_64.dll  kernel32.dll
+krb5_64.dll  krb5_64
+krb5_64.dll  krbcc64.dll
+krb5_64.dll  leashw64.dll
+msvcr100.dll  ADVAPI32.DLL
+msvcr100.dll  kernel32.dll
+msvcr100.dll  mscoree.dll
+msvcr100.dll  USER32.DLL
+msvcr100.dll  version
+rsodbc.dll  DbgHelp.dll
+rsodbc.dll  Error loading iphlpapi.dll
+rsodbc.dll  Kernel32.dll
+rsodbc.dll  mswsock.dll
+rsodbc.dll  netmsg.dll
+rsodbc.dll  ntdll
+rsodbc.dll  ntdll.dll
+rsodbc.dll  odbccp32.dll
+rsodbc.dll  static: failed to load ntdll.dll
+rsodbc.dll  Unable to initialize dbghelp.dll
+rsodbc.dll  Version
+rsodbc.dll  WinHttp
+rsodbc.dll  winhttp.dll
+rsodbc.dll  wininet.dll
+rsodbc.dll  winsock.dll
+rsodbc.dll  ws2_32
+rsodbc.dll  ws2_32.dll
+rsodbc.dll  ws2help.dll
+rsodbc.dll  ws2thk.dll
+rsodbc.dll  wsock32.dll
+rsodbc.dll  wsock32n.dll
+ssl.dll  advapi32
+ssl.dll  kernel32
+ssl.dll  mscoree.dll
+ssl.dll  ntdll
+ssl.dll  SSL
+ssl.dll  user32
+wshelp64.dll  Problem in wshelper.dll
+wshelp64.dll  WSHELP64

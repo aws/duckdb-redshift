@@ -1,0 +1,31 @@
+# name: test/client/sql/multi_statement.test
+# description: live: Redshift refuses to prepare two statements in one string, and the connection stays usable
+# group: [sql]
+
+require-env REDSHIFT_TEST_CLIENT odbc
+
+# Live only (test/README.md, "Live variables"): it needs REDSHIFT_TEST_LIVE_REGION and a build with
+# the embedded driver.
+require-env REDSHIFT_TEST_LIVE_REGION
+
+# The account-backed workgroup the live tests reach (test/README.md, "Live variables").
+require-env REDSHIFT_TEST_LIVE_WORKGROUP
+
+require-env REDSHIFT_TEST_LIVE_ACCOUNT_ID
+
+require redshift
+
+statement ok
+ATTACH '' AS rs (TYPE redshift, REGION '{REDSHIFT_TEST_LIVE_REGION}', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP '{REDSHIFT_TEST_LIVE_WORKGROUP}', ACCOUNT_ID '{REDSHIFT_TEST_LIVE_ACCOUNT_ID}');
+
+# The prepare refuses the string, so no statement runs and no second result set reaches the drain at
+# end of data. The runner adds a newline before it full-matches.
+statement error
+SELECT * FROM redshift_query('rs', 'SELECT 1 AS a; SELECT 2 AS b');
+----
+<REGEX>:(?s)Binder Error: Redshift refused the statement: ERROR:  cannot insert multiple commands into a prepared statement\nSQLSTATE: 42601\n.*
+
+query I
+SELECT * FROM redshift_query('rs', 'SELECT 2 AS b');
+----
+2

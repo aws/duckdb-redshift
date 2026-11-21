@@ -1,0 +1,70 @@
+# name: test/mock/attach_readonly.test
+# description: ATTACH ... (TYPE redshift) in a DuckDB opened read-only
+# group: [mock]
+
+require-env REDSHIFT_TEST_CLIENT mock
+
+require redshift
+
+# A database file to reopen read-only.
+load {TEST_DIR}/attach_readonly.db
+
+statement ok
+CREATE TABLE marker AS SELECT 1 AS i;
+
+load {TEST_DIR}/attach_readonly.db readonly
+
+# A read-only DuckDB makes read-only the default access mode of every ATTACH. A Redshift handle
+# cannot be read-only, so that default is refused too, and the message says how to attach.
+statement error
+ATTACH '' AS rs (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+----
+Invalid Configuration Error: Cannot attach rs: this DuckDB is read-only, so ATTACH defaults to read-only, and a Redshift handle cannot be read-only. Add READ_WRITE to the ATTACH options. For read-only access, use Redshift credentials with only SELECT grants
+
+# A path without AS: the handle is named after the path, which the refusal does not repeat.
+statement error
+ATTACH 'redshift://wg1.012345678901.us-east-1.redshift-serverless.amazonaws.com/dev' (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain);
+----
+Invalid Configuration Error: Cannot attach the handle named after its path (give it an AS name other than the path's to see it here): this DuckDB is read-only
+
+# A configuration error is reported before the read-only default.
+statement error
+ATTACH '' AS rs (TYPE redshift, REGION 'us-east-1', CLUSTER 'c');
+----
+Invalid Configuration Error: Cannot attach rs: Missing required parameter 'CREDENTIAL_PROVIDER'
+
+# An explicit read-only option is still named, as in a read-write DuckDB.
+statement error
+ATTACH '' AS rs (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901', READ_ONLY);
+----
+Invalid value true for ATTACH option 'READ_ONLY'
+
+# READ_WRITE overrides the default, and DuckDB then reports the handle as read-write.
+statement ok
+ATTACH '' AS rs (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901', READ_WRITE);
+
+query TT
+SELECT database_name, readonly FROM duckdb_databases() WHERE database_name = 'rs';
+----
+rs	false
+
+# Re-attaching without READ_WRITE asks for the read-only default, which DuckDB refuses itself,
+# before the attach callback runs, because the handle is attached read-write.
+statement error
+ATTACH IF NOT EXISTS '' AS rs (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+----
+Database "rs" is already attached in READ_WRITE mode, cannot re-attach in READ_ONLY mode
+
+statement error
+ATTACH OR REPLACE '' AS rs (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+----
+Database "rs" is already attached in READ_WRITE mode, cannot re-attach in READ_ONLY mode
+
+statement ok
+DETACH rs;
+
+statement ok
+ATTACH '' AS rs (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901', READ_ONLY false);
+
+statement ok
+DETACH rs;

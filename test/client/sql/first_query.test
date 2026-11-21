@@ -1,0 +1,24 @@
+# name: test/client/sql/first_query.test
+# description: live: redshift_query runs SELECT 1 on the default credential chain and returns its INTEGER
+# group: [sql]
+
+require-env REDSHIFT_TEST_CLIENT odbc
+
+# Live only (test/README.md, "Live variables"): it needs REDSHIFT_TEST_LIVE_REGION and a build with
+# the embedded driver.
+require-env REDSHIFT_TEST_LIVE_REGION
+
+# The account-backed workgroup the live tests reach (test/README.md, "Live variables").
+require-env REDSHIFT_TEST_LIVE_WORKGROUP
+
+require-env REDSHIFT_TEST_LIVE_ACCOUNT_ID
+
+require redshift
+
+statement ok
+ATTACH '' AS rs (TYPE redshift, REGION '{REDSHIFT_TEST_LIVE_REGION}', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP '{REDSHIFT_TEST_LIVE_WORKGROUP}', ACCOUNT_ID '{REDSHIFT_TEST_LIVE_ACCOUNT_ID}');
+
+query TI
+SELECT typeof(c), c FROM redshift_query('rs', 'SELECT 1') AS t(c);
+----
+INTEGER	1

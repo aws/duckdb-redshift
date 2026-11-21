@@ -1,0 +1,52 @@
+# name: test/client/sql/long_fetch.test
+# description: live: a result with a long column reads it with SQLGetData after the bound columns, byte-exact
+# group: [sql]
+
+require-env REDSHIFT_TEST_CLIENT odbc
+
+# Live only (test/README.md, "Live variables"): it needs REDSHIFT_TEST_LIVE_REGION and a build with
+# the embedded driver.
+require-env REDSHIFT_TEST_LIVE_REGION
+
+# The account-backed workgroup the live tests reach (test/README.md, "Live variables").
+require-env REDSHIFT_TEST_LIVE_WORKGROUP
+
+require-env REDSHIFT_TEST_LIVE_ACCOUNT_ID
+
+require redshift
+
+statement ok
+ATTACH '' AS rs (TYPE redshift, REGION '{REDSHIFT_TEST_LIVE_REGION}', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP '{REDSHIFT_TEST_LIVE_WORKGROUP}', ACCOUNT_ID '{REDSHIFT_TEST_LIVE_ACCOUNT_ID}');
+
+# The temporary table lives in the attached connection's session.
+statement ok
+SELECT * FROM redshift_query('rs', 'CREATE TEMP TABLE long_fetch_values (k INTEGER, b VARBYTE)');
+
+statement ok
+SELECT * FROM redshift_query('rs', 'INSERT INTO long_fetch_values VALUES (1, FROM_HEX(''00ff10'')), (2, FROM_HEX(''''))');
+
+# The INTEGER is bound and the VARBYTE after it read with SQLGetData as SQL_C_BINARY, so the bytes
+# arrive as stored rather than as the driver's hex text.
+query ITI
+SELECT k, hex(b), octet_length(b) FROM redshift_query('rs', 'SELECT k, b FROM long_fetch_values ORDER BY k');
+----
+1	00FF10	3
+2	(empty)	0
+
+# 5000 bytes take two reads, as a binary part holds 4096 bytes. The 3-byte pattern does not divide
+# 4096, so a part lost, repeated or out of order changes the value.
+statement ok
+SELECT * FROM redshift_query('rs', 'INSERT INTO long_fetch_values VALUES
+(3, FROM_HEX(REPEAT(''00ff10'', 1666) || ''00ff''))');
+
+query III
+SELECT k, octet_length(b), b = unhex(repeat('00FF10', 1666) || '00FF')
+FROM redshift_query('rs', 'SELECT k, b FROM long_fetch_values WHERE k = 3');
+----
+3	5000	true
+
+# The driver reports the unqualified interval as CHARACTER VARYING of size 0, which is read whole.
+query T
+SELECT * FROM redshift_query('rs', 'SELECT INTERVAL ''1 day'' AS i');
+----
+1 day

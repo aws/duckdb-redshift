@@ -1,0 +1,81 @@
+# Environment variables that make the extension refuse to connect: the driver's bundled libraries
+# apply them to settings the extension does not set, and some can weaken TLS verification. The
+# driver loader compiles this list into driver_info.h; the ODBC client checks every name before each
+# connect, and the loader checks the load-phase names before it calls the platform loader.
+#
+# Each name carries the earliest phase in which the driver or a bundled library reads it: load (the
+# platform loader call, with the static initialisers it runs), handle (handle allocation; the
+# driver's own initialisation runs at the first environment handle, so it counts as handle) or
+# connect. A review of the driver's source on every driver update records the phases, and a new
+# name is load until a review records a later one. On Windows the loader checks every name here
+# before its first LoadLibraryExW, and a DLL's DllMain reads at load, so every row is load there
+# whatever its phase.
+# In 2.3.0.0 the Kerberos names and GSS_MECH_CONFIG are load: the bundled Kerberos library reads
+# them only when GSS runs, but on macOS the system frameworks the driver links, which that review
+# leaves out, may read them earlier.
+#
+# The names change TLS trust or key logging, Kerberos configuration, plugins or tracing, an AWS
+# endpoint, the ODBC configuration file, the TLS library, or settings the ODBC client's results
+# depend on, or could not be shown harmless. The proxy variables are not refused, as TLS is verified
+# end to end, and SSL_CERT_FILE, the ODBC client's trust source, is in known-environment.txt. Every
+# driver update reviews this classification.
+#
+# The environment-name rule fails on a listed name the driver no longer holds, unless the row's
+# comment says why it need not be there: "libpq variable, refused even where absent" (the twelve
+# libpq variables PGGSSLIB to PGSYSCONFDIR below, which this list always holds), "built at run time
+# from <string>" (the per-service endpoint variables, one for each AWS service client or credential
+# provider the driver bundles, which the AWS SDK names at run time from the service's identifier),
+# or "only in <platform>,...", optionally followed by "; <why it is still refused elsewhere>". That
+# list only exempts the row from the rule on the platforms it leaves out: every name here is refused
+# on every platform, since driver_info.h compiles the whole list in for each one, which fails
+# closed. The platforms are the lock's; each macOS slice is checked as its own (osx_amd64 for
+# x86_64, osx_arm64 for arm64).
+#
+# name           phase
+PGGSSLIB         connect  # libpq variable, refused even where absent
+PGHOSTADDR       connect
+PGKRBSRVNAME     connect
+PGOPTIONS        connect
+PGREQUIRESSL     connect
+PGSERVICE        connect
+PGSERVICEFILE    connect
+PGSSLCERT        connect
+PGSSLCRL         connect
+PGSSLKEY         connect
+PGSSLROOTCERT    connect
+PGSYSCONFDIR     connect
+SSLKEYLOGFILE    connect  # only in linux_amd64,linux_arm64,osx_amd64,osx_arm64
+SSL_CERT_DIR     connect
+KRB5_CONFIG      load  # only in linux_amd64,linux_arm64,windows_amd64; on macOS the system Kerberos.framework, which the driver links, may read it
+KRB5_TRACE       load  # only in linux_amd64,linux_arm64,windows_amd64; on macOS the system Kerberos.framework, which the driver links, may read it
+KRB5CCNAME       load  # only in linux_amd64,linux_arm64,windows_amd64; on macOS the system Kerberos.framework, which the driver links, may read it
+KRB5_KTNAME      load  # only in linux_amd64,linux_arm64,windows_amd64; on macOS the system Kerberos.framework, which the driver links, may read it
+AWS_ENDPOINT_URL connect
+ODBCINI          handle  # only in linux_amd64,linux_arm64,osx_amd64,osx_arm64
+PGCLIENTENCODING connect
+PGDATESTYLE      connect
+PGTZ             connect
+PGGEQO           connect
+PGTTY            connect
+PGAUTHTYPE       connect
+PGSSLSNI         connect
+KRB5_CLIENT_KTNAME  load  # only in linux_amd64,linux_arm64; on macOS the system Kerberos.framework, which the driver links, may read it
+KRB5_KDC_PROFILE load  # only in linux_amd64,linux_arm64,windows_amd64; on macOS the system Kerberos.framework, which the driver links, may read it
+KRB5RCACHEDIR    load  # only in linux_amd64,linux_arm64,windows_amd64; on macOS the system Kerberos.framework, which the driver links, may read it
+KRB5RCACHENAME   load  # only in linux_amd64,linux_arm64,windows_amd64; on macOS the system Kerberos.framework, which the driver links, may read it
+KRB5RCACHETYPE   load  # only in linux_amd64,linux_arm64,windows_amd64; on macOS the system Kerberos.framework, which the driver links, may read it
+CURL_SSL_BACKEND connect  # only in linux_amd64,linux_arm64,osx_amd64,osx_arm64
+AWS_PROXY_NO_VERIFY_PEER  connect
+AWS_CSM_ENABLED  connect
+AWS_CSM_HOST     connect
+AWS_CSM_PORT     connect
+AWS_COMMON_AVX2  connect  # only in linux_amd64,windows_amd64
+AWS_ENDPOINT_URL_REDSHIFT  connect  # built at run time from AWS_ENDPOINT_URL_
+AWS_ENDPOINT_URL_REDSHIFT_SERVERLESS  connect  # built at run time from AWS_ENDPOINT_URL_
+AWS_ENDPOINT_URL_SSO  connect  # built at run time from AWS_ENDPOINT_URL_
+AWS_ENDPOINT_URL_SSO_OAUTH  connect  # built at run time from AWS_ENDPOINT_URL_
+AWS_ENDPOINT_URL_SIGNIN  connect  # built at run time from AWS_ENDPOINT_URL_
+AWS_ENDPOINT_URL_STS  connect  # built at run time from AWS_ENDPOINT_URL_
+GSS_MECH_CONFIG  load
+S2N_INTEG_TEST   connect
+S2N_DONT_MLOCK   connect

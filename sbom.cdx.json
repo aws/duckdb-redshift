@@ -1,0 +1,3187 @@
+{
+  "bomFormat": "CycloneDX",
+  "components": [
+    {
+      "bom-ref": "duckdb",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/duckdb/duckdb"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "name": "duckdb",
+      "properties": [
+        {
+          "name": "commit",
+          "value": "8d78114e90a53823803660bf821f6073ac87da8c"
+        }
+      ],
+      "type": "library",
+      "version": "v2.0.1"
+    },
+    {
+      "bom-ref": "driver@linux_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/aws/amazon-redshift-odbc-driver"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "45fb6e644abd50f98b3146bd538231b5a894b453997e5eb2af3c892aa9281e39"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "name": "amazon-redshift-odbc",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "linux_amd64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.so"
+        }
+      ],
+      "type": "library",
+      "version": "2.3.1.0"
+    },
+    {
+      "bom-ref": "driver@linux_arm64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/aws/amazon-redshift-odbc-driver"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "5e8b6ca2e5e1cfc47dfb96dd97a90e395ab70d9a9407ac3023d853e5ef0b7eb3"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "name": "amazon-redshift-odbc",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "linux_arm64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.so"
+        }
+      ],
+      "type": "library",
+      "version": "2.3.1.0"
+    },
+    {
+      "bom-ref": "driver@osx_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/aws/amazon-redshift-odbc-driver"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "ce4351009cafef080bd0414c2751e43291bb65a211c5043cbe70c00d2b68d788"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "name": "amazon-redshift-odbc",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "osx_amd64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.dylib"
+        }
+      ],
+      "type": "library",
+      "version": "2.3.1.0"
+    },
+    {
+      "bom-ref": "driver@osx_arm64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/aws/amazon-redshift-odbc-driver"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "ce4351009cafef080bd0414c2751e43291bb65a211c5043cbe70c00d2b68d788"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "name": "amazon-redshift-odbc",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "osx_arm64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.dylib"
+        }
+      ],
+      "type": "library",
+      "version": "2.3.1.0"
+    },
+    {
+      "bom-ref": "driver@windows_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/aws/amazon-redshift-odbc-driver"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "c5394e222bfa2f4ea73be045a3e60df75110fd2391a3add53e01ec849a951ce8"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "name": "amazon-redshift-odbc",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "windows_amd64"
+        },
+        {
+          "name": "file",
+          "value": "rsodbc.dll"
+        }
+      ],
+      "type": "library",
+      "version": "2.3.1.0"
+    },
+    {
+      "bom-ref": "bundled-0-aws-lc@windows_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/aws/aws-lc"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "51c059c0d9e5cf1792f745e44ac5ad26b541178d5f2e92029e107ae0b10f672b"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0 AND ISC AND MIT AND BSD-3-Clause AND CC0-1.0"
+        }
+      ],
+      "name": "aws-lc",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "windows_amd64"
+        },
+        {
+          "name": "file",
+          "value": "crypto.dll"
+        }
+      ],
+      "type": "library",
+      "version": "5.14.0"
+    },
+    {
+      "bom-ref": "bundled-1-aws-lc@windows_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/aws/aws-lc"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "839e3a69007d8a0d225fe32d910ea0aaeb176eda617dcd80e2a4af9f3f34937c"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0 AND ISC AND MIT AND BSD-3-Clause AND CC0-1.0"
+        }
+      ],
+      "name": "aws-lc",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "windows_amd64"
+        },
+        {
+          "name": "file",
+          "value": "ssl.dll"
+        }
+      ],
+      "type": "library",
+      "version": "5.14.0"
+    },
+    {
+      "bom-ref": "bundled-2-comerr64.dll@windows_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/krb5/krb5"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "cf5028c26247bb9a515753409493214fa445913d24d36e7a2f873a5c58b9dcf8"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "unverified"
+        }
+      ],
+      "name": "comerr64.dll",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "windows_amd64"
+        },
+        {
+          "name": "file",
+          "value": "comerr64.dll"
+        }
+      ],
+      "type": "library",
+      "version": "4.0.1"
+    },
+    {
+      "bom-ref": "bundled-3-gssapi64.dll@windows_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/krb5/krb5"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "c1b2fdef2eefe0d5460b3d7cbe4c3211a4f8d99015e61707ab9a5b8183d9f7c0"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "unverified"
+        }
+      ],
+      "name": "gssapi64.dll",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "windows_amd64"
+        },
+        {
+          "name": "file",
+          "value": "gssapi64.dll"
+        }
+      ],
+      "type": "library",
+      "version": "4.0.1"
+    },
+    {
+      "bom-ref": "bundled-4-k5sprt64.dll@windows_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/krb5/krb5"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "76f8214ca89ae56a92a32f6191f7c652b4fb59baf678ab8a1cf9e42a0a81594a"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "unverified"
+        }
+      ],
+      "name": "k5sprt64.dll",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "windows_amd64"
+        },
+        {
+          "name": "file",
+          "value": "k5sprt64.dll"
+        }
+      ],
+      "type": "library",
+      "version": "4.0.1"
+    },
+    {
+      "bom-ref": "bundled-5-krb5_64.dll@windows_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/krb5/krb5"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "32fd0aabbf2cbcff14c05ad8c01169ffa3a6c16517dfd6c507bd88332d5b8e25"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "unverified"
+        }
+      ],
+      "name": "krb5_64.dll",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "windows_amd64"
+        },
+        {
+          "name": "file",
+          "value": "krb5_64.dll"
+        }
+      ],
+      "type": "library",
+      "version": "4.0.1"
+    },
+    {
+      "bom-ref": "bundled-6-wshelp64.dll@windows_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/krb5/krb5"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "5e9315d525d1e37aea8ff67dc9ba2e926450caae7cd8a58c2798322d3c708852"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "unverified"
+        }
+      ],
+      "name": "wshelp64.dll",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "windows_amd64"
+        },
+        {
+          "name": "file",
+          "value": "wshelp64.dll"
+        }
+      ],
+      "type": "library",
+      "version": "4.0.1"
+    },
+    {
+      "bom-ref": "bundled-7-msvcr100.dll@windows_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "unverified"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "1d1a1ae540ba132f998d60d3622f0297b6e86ae399332c3b47462d7c0f560a36"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "unverified"
+        }
+      ],
+      "name": "msvcr100.dll",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "windows_amd64"
+        },
+        {
+          "name": "file",
+          "value": "msvcr100.dll"
+        }
+      ],
+      "type": "library",
+      "version": "10.0.40219.1"
+    },
+    {
+      "bom-ref": "bundled-8-aws-lc@linux_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/aws/aws-lc"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "45fb6e644abd50f98b3146bd538231b5a894b453997e5eb2af3c892aa9281e39"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0 AND ISC AND MIT AND BSD-3-Clause AND CC0-1.0"
+        }
+      ],
+      "name": "aws-lc",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "linux_amd64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.so"
+        }
+      ],
+      "type": "library",
+      "version": "5.12.0"
+    },
+    {
+      "bom-ref": "bundled-8-aws-lc@linux_arm64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/aws/aws-lc"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "5e8b6ca2e5e1cfc47dfb96dd97a90e395ab70d9a9407ac3023d853e5ef0b7eb3"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0 AND ISC AND MIT AND BSD-3-Clause AND CC0-1.0"
+        }
+      ],
+      "name": "aws-lc",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "linux_arm64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.so"
+        }
+      ],
+      "type": "library",
+      "version": "5.12.0"
+    },
+    {
+      "bom-ref": "bundled-8-aws-lc@osx_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/aws/aws-lc"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "ce4351009cafef080bd0414c2751e43291bb65a211c5043cbe70c00d2b68d788"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0 AND ISC AND MIT AND BSD-3-Clause AND CC0-1.0"
+        }
+      ],
+      "name": "aws-lc",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "osx_amd64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.dylib"
+        }
+      ],
+      "type": "library",
+      "version": "5.12.0"
+    },
+    {
+      "bom-ref": "bundled-8-aws-lc@osx_arm64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/aws/aws-lc"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "ce4351009cafef080bd0414c2751e43291bb65a211c5043cbe70c00d2b68d788"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0 AND ISC AND MIT AND BSD-3-Clause AND CC0-1.0"
+        }
+      ],
+      "name": "aws-lc",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "osx_arm64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.dylib"
+        }
+      ],
+      "type": "library",
+      "version": "5.12.0"
+    },
+    {
+      "bom-ref": "bundled-9-curl@linux_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/curl/curl"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "45fb6e644abd50f98b3146bd538231b5a894b453997e5eb2af3c892aa9281e39"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "curl"
+        }
+      ],
+      "name": "curl",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "linux_amd64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.so"
+        }
+      ],
+      "type": "library",
+      "version": "8.23.0"
+    },
+    {
+      "bom-ref": "bundled-9-curl@linux_arm64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/curl/curl"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "5e8b6ca2e5e1cfc47dfb96dd97a90e395ab70d9a9407ac3023d853e5ef0b7eb3"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "curl"
+        }
+      ],
+      "name": "curl",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "linux_arm64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.so"
+        }
+      ],
+      "type": "library",
+      "version": "8.23.0"
+    },
+    {
+      "bom-ref": "bundled-9-curl@osx_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/curl/curl"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "ce4351009cafef080bd0414c2751e43291bb65a211c5043cbe70c00d2b68d788"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "curl"
+        }
+      ],
+      "name": "curl",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "osx_amd64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.dylib"
+        }
+      ],
+      "type": "library",
+      "version": "8.23.0"
+    },
+    {
+      "bom-ref": "bundled-9-curl@osx_arm64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/curl/curl"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "ce4351009cafef080bd0414c2751e43291bb65a211c5043cbe70c00d2b68d788"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "curl"
+        }
+      ],
+      "name": "curl",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "osx_arm64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.dylib"
+        }
+      ],
+      "type": "library",
+      "version": "8.23.0"
+    },
+    {
+      "bom-ref": "bundled-10-c-ares@linux_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/c-ares/c-ares"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "45fb6e644abd50f98b3146bd538231b5a894b453997e5eb2af3c892aa9281e39"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "name": "c-ares",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "linux_amd64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.so"
+        }
+      ],
+      "type": "library",
+      "version": "1.34.8"
+    },
+    {
+      "bom-ref": "bundled-10-c-ares@linux_arm64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/c-ares/c-ares"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "5e8b6ca2e5e1cfc47dfb96dd97a90e395ab70d9a9407ac3023d853e5ef0b7eb3"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "name": "c-ares",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "linux_arm64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.so"
+        }
+      ],
+      "type": "library",
+      "version": "1.34.8"
+    },
+    {
+      "bom-ref": "bundled-10-c-ares@osx_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/c-ares/c-ares"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "ce4351009cafef080bd0414c2751e43291bb65a211c5043cbe70c00d2b68d788"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "name": "c-ares",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "osx_amd64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.dylib"
+        }
+      ],
+      "type": "library",
+      "version": "1.34.8"
+    },
+    {
+      "bom-ref": "bundled-10-c-ares@osx_arm64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/c-ares/c-ares"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "ce4351009cafef080bd0414c2751e43291bb65a211c5043cbe70c00d2b68d788"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "name": "c-ares",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "osx_arm64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.dylib"
+        }
+      ],
+      "type": "library",
+      "version": "1.34.8"
+    },
+    {
+      "bom-ref": "bundled-11-c-ares@windows_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/c-ares/c-ares"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "c5394e222bfa2f4ea73be045a3e60df75110fd2391a3add53e01ec849a951ce8"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "name": "c-ares",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "windows_amd64"
+        },
+        {
+          "name": "file",
+          "value": "rsodbc.dll"
+        }
+      ],
+      "type": "library",
+      "version": "1.34.9"
+    },
+    {
+      "bom-ref": "bundled-12-nghttp2@linux_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/nghttp2/nghttp2"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "45fb6e644abd50f98b3146bd538231b5a894b453997e5eb2af3c892aa9281e39"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "name": "nghttp2",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "linux_amd64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.so"
+        }
+      ],
+      "type": "library",
+      "version": "1.69.0"
+    },
+    {
+      "bom-ref": "bundled-12-nghttp2@linux_arm64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/nghttp2/nghttp2"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "5e8b6ca2e5e1cfc47dfb96dd97a90e395ab70d9a9407ac3023d853e5ef0b7eb3"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "name": "nghttp2",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "linux_arm64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.so"
+        }
+      ],
+      "type": "library",
+      "version": "1.69.0"
+    },
+    {
+      "bom-ref": "bundled-12-nghttp2@osx_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/nghttp2/nghttp2"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "ce4351009cafef080bd0414c2751e43291bb65a211c5043cbe70c00d2b68d788"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "name": "nghttp2",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "osx_amd64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.dylib"
+        }
+      ],
+      "type": "library",
+      "version": "1.69.0"
+    },
+    {
+      "bom-ref": "bundled-12-nghttp2@osx_arm64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/nghttp2/nghttp2"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "ce4351009cafef080bd0414c2751e43291bb65a211c5043cbe70c00d2b68d788"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "name": "nghttp2",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "osx_arm64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.dylib"
+        }
+      ],
+      "type": "library",
+      "version": "1.69.0"
+    },
+    {
+      "bom-ref": "bundled-13-zlib@linux_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/madler/zlib"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "45fb6e644abd50f98b3146bd538231b5a894b453997e5eb2af3c892aa9281e39"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Zlib"
+        }
+      ],
+      "name": "zlib",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "linux_amd64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.so"
+        }
+      ],
+      "type": "library",
+      "version": "1.3.2"
+    },
+    {
+      "bom-ref": "bundled-13-zlib@linux_arm64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/madler/zlib"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "5e8b6ca2e5e1cfc47dfb96dd97a90e395ab70d9a9407ac3023d853e5ef0b7eb3"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Zlib"
+        }
+      ],
+      "name": "zlib",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "linux_arm64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.so"
+        }
+      ],
+      "type": "library",
+      "version": "1.3.2"
+    },
+    {
+      "bom-ref": "bundled-13-zlib@osx_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/madler/zlib"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "ce4351009cafef080bd0414c2751e43291bb65a211c5043cbe70c00d2b68d788"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Zlib"
+        }
+      ],
+      "name": "zlib",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "osx_amd64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.dylib"
+        }
+      ],
+      "type": "library",
+      "version": "1.3.2"
+    },
+    {
+      "bom-ref": "bundled-13-zlib@osx_arm64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/madler/zlib"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "ce4351009cafef080bd0414c2751e43291bb65a211c5043cbe70c00d2b68d788"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Zlib"
+        }
+      ],
+      "name": "zlib",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "osx_arm64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.dylib"
+        }
+      ],
+      "type": "library",
+      "version": "1.3.2"
+    },
+    {
+      "bom-ref": "bundled-14-krb5@linux_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/krb5/krb5"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "45fb6e644abd50f98b3146bd538231b5a894b453997e5eb2af3c892aa9281e39"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "unverified"
+        }
+      ],
+      "name": "krb5",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "linux_amd64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.so"
+        }
+      ],
+      "type": "library",
+      "version": "1.21.3"
+    },
+    {
+      "bom-ref": "bundled-14-krb5@linux_arm64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/krb5/krb5"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "5e8b6ca2e5e1cfc47dfb96dd97a90e395ab70d9a9407ac3023d853e5ef0b7eb3"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "unverified"
+        }
+      ],
+      "name": "krb5",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "linux_arm64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.so"
+        }
+      ],
+      "type": "library",
+      "version": "1.21.3"
+    },
+    {
+      "bom-ref": "bundled-15-s2n-tls@linux_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/aws/s2n-tls"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "45fb6e644abd50f98b3146bd538231b5a894b453997e5eb2af3c892aa9281e39"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "name": "s2n-tls",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "linux_amd64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.so"
+        }
+      ],
+      "type": "library",
+      "version": "unrecorded: the binaries record no s2n-tls version"
+    },
+    {
+      "bom-ref": "bundled-15-s2n-tls@linux_arm64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/aws/s2n-tls"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "5e8b6ca2e5e1cfc47dfb96dd97a90e395ab70d9a9407ac3023d853e5ef0b7eb3"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "name": "s2n-tls",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "linux_arm64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.so"
+        }
+      ],
+      "type": "library",
+      "version": "unrecorded: the binaries record no s2n-tls version"
+    },
+    {
+      "bom-ref": "bundled-16-cjson@linux_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/DaveGamble/cJSON"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "45fb6e644abd50f98b3146bd538231b5a894b453997e5eb2af3c892aa9281e39"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "name": "cjson",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "linux_amd64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.so"
+        }
+      ],
+      "type": "library",
+      "version": "1.7.19"
+    },
+    {
+      "bom-ref": "bundled-16-cjson@linux_arm64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/DaveGamble/cJSON"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "5e8b6ca2e5e1cfc47dfb96dd97a90e395ab70d9a9407ac3023d853e5ef0b7eb3"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "name": "cjson",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "linux_arm64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.so"
+        }
+      ],
+      "type": "library",
+      "version": "1.7.19"
+    },
+    {
+      "bom-ref": "bundled-16-cjson@osx_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/DaveGamble/cJSON"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "ce4351009cafef080bd0414c2751e43291bb65a211c5043cbe70c00d2b68d788"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "name": "cjson",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "osx_amd64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.dylib"
+        }
+      ],
+      "type": "library",
+      "version": "1.7.19"
+    },
+    {
+      "bom-ref": "bundled-16-cjson@osx_arm64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/DaveGamble/cJSON"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "ce4351009cafef080bd0414c2751e43291bb65a211c5043cbe70c00d2b68d788"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "name": "cjson",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "osx_arm64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.dylib"
+        }
+      ],
+      "type": "library",
+      "version": "1.7.19"
+    },
+    {
+      "bom-ref": "bundled-16-cjson@windows_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/DaveGamble/cJSON"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "c5394e222bfa2f4ea73be045a3e60df75110fd2391a3add53e01ec849a951ce8"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "name": "cjson",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "windows_amd64"
+        },
+        {
+          "name": "file",
+          "value": "rsodbc.dll"
+        }
+      ],
+      "type": "library",
+      "version": "1.7.19"
+    },
+    {
+      "bom-ref": "bundled-17-tinyxml2@linux_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/leethomason/tinyxml2"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "45fb6e644abd50f98b3146bd538231b5a894b453997e5eb2af3c892aa9281e39"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Zlib"
+        }
+      ],
+      "name": "tinyxml2",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "linux_amd64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.so"
+        }
+      ],
+      "type": "library",
+      "version": "11.0.0"
+    },
+    {
+      "bom-ref": "bundled-17-tinyxml2@linux_arm64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/leethomason/tinyxml2"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "5e8b6ca2e5e1cfc47dfb96dd97a90e395ab70d9a9407ac3023d853e5ef0b7eb3"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Zlib"
+        }
+      ],
+      "name": "tinyxml2",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "linux_arm64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.so"
+        }
+      ],
+      "type": "library",
+      "version": "11.0.0"
+    },
+    {
+      "bom-ref": "bundled-17-tinyxml2@osx_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/leethomason/tinyxml2"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "ce4351009cafef080bd0414c2751e43291bb65a211c5043cbe70c00d2b68d788"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Zlib"
+        }
+      ],
+      "name": "tinyxml2",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "osx_amd64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.dylib"
+        }
+      ],
+      "type": "library",
+      "version": "11.0.0"
+    },
+    {
+      "bom-ref": "bundled-17-tinyxml2@osx_arm64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/leethomason/tinyxml2"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "ce4351009cafef080bd0414c2751e43291bb65a211c5043cbe70c00d2b68d788"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Zlib"
+        }
+      ],
+      "name": "tinyxml2",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "osx_arm64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.dylib"
+        }
+      ],
+      "type": "library",
+      "version": "11.0.0"
+    },
+    {
+      "bom-ref": "bundled-17-tinyxml2@windows_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/leethomason/tinyxml2"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "c5394e222bfa2f4ea73be045a3e60df75110fd2391a3add53e01ec849a951ce8"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Zlib"
+        }
+      ],
+      "name": "tinyxml2",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "windows_amd64"
+        },
+        {
+          "name": "file",
+          "value": "rsodbc.dll"
+        }
+      ],
+      "type": "library",
+      "version": "11.0.0"
+    },
+    {
+      "bom-ref": "bundled-18-libcbor@linux_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/PJK/libcbor"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "45fb6e644abd50f98b3146bd538231b5a894b453997e5eb2af3c892aa9281e39"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "name": "libcbor",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "linux_amd64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.so"
+        }
+      ],
+      "type": "library",
+      "version": "0.13.0"
+    },
+    {
+      "bom-ref": "bundled-18-libcbor@linux_arm64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/PJK/libcbor"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "5e8b6ca2e5e1cfc47dfb96dd97a90e395ab70d9a9407ac3023d853e5ef0b7eb3"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "name": "libcbor",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "linux_arm64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.so"
+        }
+      ],
+      "type": "library",
+      "version": "0.13.0"
+    },
+    {
+      "bom-ref": "bundled-18-libcbor@osx_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/PJK/libcbor"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "ce4351009cafef080bd0414c2751e43291bb65a211c5043cbe70c00d2b68d788"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "name": "libcbor",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "osx_amd64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.dylib"
+        }
+      ],
+      "type": "library",
+      "version": "0.13.0"
+    },
+    {
+      "bom-ref": "bundled-18-libcbor@osx_arm64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/PJK/libcbor"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "ce4351009cafef080bd0414c2751e43291bb65a211c5043cbe70c00d2b68d788"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "name": "libcbor",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "osx_arm64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.dylib"
+        }
+      ],
+      "type": "library",
+      "version": "0.13.0"
+    },
+    {
+      "bom-ref": "bundled-18-libcbor@windows_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/PJK/libcbor"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "c5394e222bfa2f4ea73be045a3e60df75110fd2391a3add53e01ec849a951ce8"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "name": "libcbor",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "windows_amd64"
+        },
+        {
+          "name": "file",
+          "value": "rsodbc.dll"
+        }
+      ],
+      "type": "library",
+      "version": "0.13.0"
+    },
+    {
+      "bom-ref": "bundled-19-xxhash@linux_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/Cyan4973/xxHash"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "45fb6e644abd50f98b3146bd538231b5a894b453997e5eb2af3c892aa9281e39"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "BSD-2-Clause"
+        }
+      ],
+      "name": "xxhash",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "linux_amd64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.so"
+        }
+      ],
+      "type": "library",
+      "version": "0.8.3"
+    },
+    {
+      "bom-ref": "bundled-19-xxhash@linux_arm64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/Cyan4973/xxHash"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "5e8b6ca2e5e1cfc47dfb96dd97a90e395ab70d9a9407ac3023d853e5ef0b7eb3"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "BSD-2-Clause"
+        }
+      ],
+      "name": "xxhash",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "linux_arm64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.so"
+        }
+      ],
+      "type": "library",
+      "version": "0.8.3"
+    },
+    {
+      "bom-ref": "bundled-19-xxhash@osx_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/Cyan4973/xxHash"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "ce4351009cafef080bd0414c2751e43291bb65a211c5043cbe70c00d2b68d788"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "BSD-2-Clause"
+        }
+      ],
+      "name": "xxhash",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "osx_amd64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.dylib"
+        }
+      ],
+      "type": "library",
+      "version": "0.8.3"
+    },
+    {
+      "bom-ref": "bundled-19-xxhash@osx_arm64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/Cyan4973/xxHash"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "ce4351009cafef080bd0414c2751e43291bb65a211c5043cbe70c00d2b68d788"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "BSD-2-Clause"
+        }
+      ],
+      "name": "xxhash",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "osx_arm64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.dylib"
+        }
+      ],
+      "type": "library",
+      "version": "0.8.3"
+    },
+    {
+      "bom-ref": "bundled-19-xxhash@windows_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/Cyan4973/xxHash"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "c5394e222bfa2f4ea73be045a3e60df75110fd2391a3add53e01ec849a951ce8"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "BSD-2-Clause"
+        }
+      ],
+      "name": "xxhash",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "windows_amd64"
+        },
+        {
+          "name": "file",
+          "value": "rsodbc.dll"
+        }
+      ],
+      "type": "library",
+      "version": "0.8.3"
+    },
+    {
+      "bom-ref": "bundled-20-libpq@linux_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/postgres/postgres"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "45fb6e644abd50f98b3146bd538231b5a894b453997e5eb2af3c892aa9281e39"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "PostgreSQL"
+        }
+      ],
+      "name": "libpq",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "linux_amd64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.so"
+        }
+      ],
+      "type": "library",
+      "version": "unrecorded: the binaries record no PostgreSQL version"
+    },
+    {
+      "bom-ref": "bundled-20-libpq@linux_arm64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/postgres/postgres"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "5e8b6ca2e5e1cfc47dfb96dd97a90e395ab70d9a9407ac3023d853e5ef0b7eb3"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "PostgreSQL"
+        }
+      ],
+      "name": "libpq",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "linux_arm64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.so"
+        }
+      ],
+      "type": "library",
+      "version": "unrecorded: the binaries record no PostgreSQL version"
+    },
+    {
+      "bom-ref": "bundled-20-libpq@osx_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/postgres/postgres"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "ce4351009cafef080bd0414c2751e43291bb65a211c5043cbe70c00d2b68d788"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "PostgreSQL"
+        }
+      ],
+      "name": "libpq",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "osx_amd64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.dylib"
+        }
+      ],
+      "type": "library",
+      "version": "unrecorded: the binaries record no PostgreSQL version"
+    },
+    {
+      "bom-ref": "bundled-20-libpq@osx_arm64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/postgres/postgres"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "ce4351009cafef080bd0414c2751e43291bb65a211c5043cbe70c00d2b68d788"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "PostgreSQL"
+        }
+      ],
+      "name": "libpq",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "osx_arm64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.dylib"
+        }
+      ],
+      "type": "library",
+      "version": "unrecorded: the binaries record no PostgreSQL version"
+    },
+    {
+      "bom-ref": "bundled-20-libpq@windows_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/postgres/postgres"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "c5394e222bfa2f4ea73be045a3e60df75110fd2391a3add53e01ec849a951ce8"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "PostgreSQL"
+        }
+      ],
+      "name": "libpq",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "windows_amd64"
+        },
+        {
+          "name": "file",
+          "value": "rsodbc.dll"
+        }
+      ],
+      "type": "library",
+      "version": "unrecorded: the binaries record no PostgreSQL version"
+    },
+    {
+      "bom-ref": "bundled-21-aws-sdk-cpp@linux_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/aws/aws-sdk-cpp"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "45fb6e644abd50f98b3146bd538231b5a894b453997e5eb2af3c892aa9281e39"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "name": "aws-sdk-cpp",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "linux_amd64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.so"
+        }
+      ],
+      "type": "library",
+      "version": "1.11.922"
+    },
+    {
+      "bom-ref": "bundled-21-aws-sdk-cpp@linux_arm64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/aws/aws-sdk-cpp"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "5e8b6ca2e5e1cfc47dfb96dd97a90e395ab70d9a9407ac3023d853e5ef0b7eb3"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "name": "aws-sdk-cpp",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "linux_arm64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.so"
+        }
+      ],
+      "type": "library",
+      "version": "1.11.922"
+    },
+    {
+      "bom-ref": "bundled-22-aws-sdk-cpp@osx_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/aws/aws-sdk-cpp"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "ce4351009cafef080bd0414c2751e43291bb65a211c5043cbe70c00d2b68d788"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "name": "aws-sdk-cpp",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "osx_amd64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.dylib"
+        }
+      ],
+      "type": "library",
+      "version": "1.11.922"
+    },
+    {
+      "bom-ref": "bundled-22-aws-sdk-cpp@osx_arm64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/aws/aws-sdk-cpp"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "ce4351009cafef080bd0414c2751e43291bb65a211c5043cbe70c00d2b68d788"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "name": "aws-sdk-cpp",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "osx_arm64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.dylib"
+        }
+      ],
+      "type": "library",
+      "version": "1.11.922"
+    },
+    {
+      "bom-ref": "bundled-23-aws-sdk-cpp@windows_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/aws/aws-sdk-cpp"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "c5394e222bfa2f4ea73be045a3e60df75110fd2391a3add53e01ec849a951ce8"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "name": "aws-sdk-cpp",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "windows_amd64"
+        },
+        {
+          "name": "file",
+          "value": "rsodbc.dll"
+        }
+      ],
+      "type": "library",
+      "version": "1.11.929"
+    },
+    {
+      "bom-ref": "bundled-24-lz4@linux_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/lz4/lz4"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "45fb6e644abd50f98b3146bd538231b5a894b453997e5eb2af3c892aa9281e39"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "BSD-2-Clause"
+        }
+      ],
+      "name": "lz4",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "linux_amd64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.so"
+        }
+      ],
+      "type": "library",
+      "version": "1.9.4"
+    },
+    {
+      "bom-ref": "bundled-24-lz4@linux_arm64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/lz4/lz4"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "5e8b6ca2e5e1cfc47dfb96dd97a90e395ab70d9a9407ac3023d853e5ef0b7eb3"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "BSD-2-Clause"
+        }
+      ],
+      "name": "lz4",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "linux_arm64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.so"
+        }
+      ],
+      "type": "library",
+      "version": "1.9.4"
+    },
+    {
+      "bom-ref": "bundled-24-lz4@osx_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/lz4/lz4"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "ce4351009cafef080bd0414c2751e43291bb65a211c5043cbe70c00d2b68d788"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "BSD-2-Clause"
+        }
+      ],
+      "name": "lz4",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "osx_amd64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.dylib"
+        }
+      ],
+      "type": "library",
+      "version": "1.9.4"
+    },
+    {
+      "bom-ref": "bundled-24-lz4@osx_arm64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/lz4/lz4"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "ce4351009cafef080bd0414c2751e43291bb65a211c5043cbe70c00d2b68d788"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "BSD-2-Clause"
+        }
+      ],
+      "name": "lz4",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "osx_arm64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.dylib"
+        }
+      ],
+      "type": "library",
+      "version": "1.9.4"
+    },
+    {
+      "bom-ref": "bundled-25-lz4@windows_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/lz4/lz4"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "c5394e222bfa2f4ea73be045a3e60df75110fd2391a3add53e01ec849a951ce8"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "BSD-2-Clause"
+        }
+      ],
+      "name": "lz4",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "windows_amd64"
+        },
+        {
+          "name": "file",
+          "value": "rsodbc.dll"
+        }
+      ],
+      "type": "library",
+      "version": "unrecorded: rsodbc.dll records no LZ4 version"
+    },
+    {
+      "bom-ref": "bundled-26-zstd@linux_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/facebook/zstd"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "45fb6e644abd50f98b3146bd538231b5a894b453997e5eb2af3c892aa9281e39"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "BSD-3-Clause"
+        }
+      ],
+      "name": "zstd",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "linux_amd64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.so"
+        }
+      ],
+      "type": "library",
+      "version": "1.5.3"
+    },
+    {
+      "bom-ref": "bundled-26-zstd@linux_arm64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/facebook/zstd"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "5e8b6ca2e5e1cfc47dfb96dd97a90e395ab70d9a9407ac3023d853e5ef0b7eb3"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "BSD-3-Clause"
+        }
+      ],
+      "name": "zstd",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "linux_arm64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.so"
+        }
+      ],
+      "type": "library",
+      "version": "1.5.3"
+    },
+    {
+      "bom-ref": "bundled-26-zstd@osx_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/facebook/zstd"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "ce4351009cafef080bd0414c2751e43291bb65a211c5043cbe70c00d2b68d788"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "BSD-3-Clause"
+        }
+      ],
+      "name": "zstd",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "osx_amd64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.dylib"
+        }
+      ],
+      "type": "library",
+      "version": "1.5.3"
+    },
+    {
+      "bom-ref": "bundled-26-zstd@osx_arm64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/facebook/zstd"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "ce4351009cafef080bd0414c2751e43291bb65a211c5043cbe70c00d2b68d788"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "BSD-3-Clause"
+        }
+      ],
+      "name": "zstd",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "osx_arm64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.dylib"
+        }
+      ],
+      "type": "library",
+      "version": "1.5.3"
+    },
+    {
+      "bom-ref": "bundled-27-zstd@windows_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/facebook/zstd"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "c5394e222bfa2f4ea73be045a3e60df75110fd2391a3add53e01ec849a951ce8"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "BSD-3-Clause"
+        }
+      ],
+      "name": "zstd",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "windows_amd64"
+        },
+        {
+          "name": "file",
+          "value": "rsodbc.dll"
+        }
+      ],
+      "type": "library",
+      "version": "unrecorded: rsodbc.dll records no Zstandard version"
+    },
+    {
+      "bom-ref": "bundled-28-aws-c-common@linux_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/awslabs/aws-c-common"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "45fb6e644abd50f98b3146bd538231b5a894b453997e5eb2af3c892aa9281e39"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "name": "aws-c-common",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "linux_amd64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.so"
+        }
+      ],
+      "type": "library",
+      "version": "unrecorded: the Linux and macOS binaries record no aws-c-common version"
+    },
+    {
+      "bom-ref": "bundled-28-aws-c-common@linux_arm64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/awslabs/aws-c-common"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "5e8b6ca2e5e1cfc47dfb96dd97a90e395ab70d9a9407ac3023d853e5ef0b7eb3"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "name": "aws-c-common",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "linux_arm64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.so"
+        }
+      ],
+      "type": "library",
+      "version": "unrecorded: the Linux and macOS binaries record no aws-c-common version"
+    },
+    {
+      "bom-ref": "bundled-28-aws-c-common@osx_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/awslabs/aws-c-common"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "ce4351009cafef080bd0414c2751e43291bb65a211c5043cbe70c00d2b68d788"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "name": "aws-c-common",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "osx_amd64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.dylib"
+        }
+      ],
+      "type": "library",
+      "version": "unrecorded: the Linux and macOS binaries record no aws-c-common version"
+    },
+    {
+      "bom-ref": "bundled-28-aws-c-common@osx_arm64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/awslabs/aws-c-common"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "ce4351009cafef080bd0414c2751e43291bb65a211c5043cbe70c00d2b68d788"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "name": "aws-c-common",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "osx_arm64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.dylib"
+        }
+      ],
+      "type": "library",
+      "version": "unrecorded: the Linux and macOS binaries record no aws-c-common version"
+    },
+    {
+      "bom-ref": "bundled-29-aws-c-common@windows_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/awslabs/aws-c-common"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "c5394e222bfa2f4ea73be045a3e60df75110fd2391a3add53e01ec849a951ce8"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "name": "aws-c-common",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "windows_amd64"
+        },
+        {
+          "name": "file",
+          "value": "rsodbc.dll"
+        }
+      ],
+      "type": "library",
+      "version": "1.0.5"
+    },
+    {
+      "bom-ref": "bundled-30-aws-checksums@linux_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/awslabs/aws-checksums"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "45fb6e644abd50f98b3146bd538231b5a894b453997e5eb2af3c892aa9281e39"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "name": "aws-checksums",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "linux_amd64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.so"
+        }
+      ],
+      "type": "library",
+      "version": "unrecorded: the Linux and macOS binaries record no aws-checksums version"
+    },
+    {
+      "bom-ref": "bundled-30-aws-checksums@linux_arm64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/awslabs/aws-checksums"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "5e8b6ca2e5e1cfc47dfb96dd97a90e395ab70d9a9407ac3023d853e5ef0b7eb3"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "name": "aws-checksums",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "linux_arm64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.so"
+        }
+      ],
+      "type": "library",
+      "version": "unrecorded: the Linux and macOS binaries record no aws-checksums version"
+    },
+    {
+      "bom-ref": "bundled-30-aws-checksums@osx_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/awslabs/aws-checksums"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "ce4351009cafef080bd0414c2751e43291bb65a211c5043cbe70c00d2b68d788"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "name": "aws-checksums",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "osx_amd64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.dylib"
+        }
+      ],
+      "type": "library",
+      "version": "unrecorded: the Linux and macOS binaries record no aws-checksums version"
+    },
+    {
+      "bom-ref": "bundled-30-aws-checksums@osx_arm64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/awslabs/aws-checksums"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "ce4351009cafef080bd0414c2751e43291bb65a211c5043cbe70c00d2b68d788"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "name": "aws-checksums",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "osx_arm64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.dylib"
+        }
+      ],
+      "type": "library",
+      "version": "unrecorded: the Linux and macOS binaries record no aws-checksums version"
+    },
+    {
+      "bom-ref": "bundled-31-aws-checksums@windows_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/awslabs/aws-checksums"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "c5394e222bfa2f4ea73be045a3e60df75110fd2391a3add53e01ec849a951ce8"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "name": "aws-checksums",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "windows_amd64"
+        },
+        {
+          "name": "file",
+          "value": "rsodbc.dll"
+        }
+      ],
+      "type": "library",
+      "version": "1.0.1"
+    },
+    {
+      "bom-ref": "bundled-32-libstdc++@linux_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://gcc.gnu.org/git/gcc.git"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "45fb6e644abd50f98b3146bd538231b5a894b453997e5eb2af3c892aa9281e39"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "GPL-3.0-or-later WITH GCC-exception-3.1"
+        }
+      ],
+      "name": "libstdc++",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "linux_amd64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.so"
+        }
+      ],
+      "type": "library",
+      "version": "7.3.1"
+    },
+    {
+      "bom-ref": "bundled-32-libstdc++@linux_arm64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://gcc.gnu.org/git/gcc.git"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "5e8b6ca2e5e1cfc47dfb96dd97a90e395ab70d9a9407ac3023d853e5ef0b7eb3"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "GPL-3.0-or-later WITH GCC-exception-3.1"
+        }
+      ],
+      "name": "libstdc++",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "linux_arm64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.so"
+        }
+      ],
+      "type": "library",
+      "version": "7.3.1"
+    },
+    {
+      "bom-ref": "bundled-33-libgcc@linux_amd64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://gcc.gnu.org/git/gcc.git"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "45fb6e644abd50f98b3146bd538231b5a894b453997e5eb2af3c892aa9281e39"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "GPL-3.0-or-later WITH GCC-exception-3.1"
+        }
+      ],
+      "name": "libgcc",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "linux_amd64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.so"
+        }
+      ],
+      "type": "library",
+      "version": "7.3.1"
+    },
+    {
+      "bom-ref": "bundled-33-libgcc@linux_arm64",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://gcc.gnu.org/git/gcc.git"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "5e8b6ca2e5e1cfc47dfb96dd97a90e395ab70d9a9407ac3023d853e5ef0b7eb3"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "GPL-3.0-or-later WITH GCC-exception-3.1"
+        }
+      ],
+      "name": "libgcc",
+      "properties": [
+        {
+          "name": "platform",
+          "value": "linux_arm64"
+        },
+        {
+          "name": "file",
+          "value": "librsodbc64.so"
+        }
+      ],
+      "type": "library",
+      "version": "7.3.1"
+    }
+  ],
+  "dependencies": [
+    {
+      "dependsOn": [
+        "duckdb",
+        "driver@linux_amd64",
+        "driver@linux_arm64",
+        "driver@osx_amd64",
+        "driver@osx_arm64",
+        "driver@windows_amd64",
+        "bundled-0-aws-lc@windows_amd64",
+        "bundled-1-aws-lc@windows_amd64",
+        "bundled-2-comerr64.dll@windows_amd64",
+        "bundled-3-gssapi64.dll@windows_amd64",
+        "bundled-4-k5sprt64.dll@windows_amd64",
+        "bundled-5-krb5_64.dll@windows_amd64",
+        "bundled-6-wshelp64.dll@windows_amd64",
+        "bundled-7-msvcr100.dll@windows_amd64",
+        "bundled-8-aws-lc@linux_amd64",
+        "bundled-8-aws-lc@linux_arm64",
+        "bundled-8-aws-lc@osx_amd64",
+        "bundled-8-aws-lc@osx_arm64",
+        "bundled-9-curl@linux_amd64",
+        "bundled-9-curl@linux_arm64",
+        "bundled-9-curl@osx_amd64",
+        "bundled-9-curl@osx_arm64",
+        "bundled-10-c-ares@linux_amd64",
+        "bundled-10-c-ares@linux_arm64",
+        "bundled-10-c-ares@osx_amd64",
+        "bundled-10-c-ares@osx_arm64",
+        "bundled-11-c-ares@windows_amd64",
+        "bundled-12-nghttp2@linux_amd64",
+        "bundled-12-nghttp2@linux_arm64",
+        "bundled-12-nghttp2@osx_amd64",
+        "bundled-12-nghttp2@osx_arm64",
+        "bundled-13-zlib@linux_amd64",
+        "bundled-13-zlib@linux_arm64",
+        "bundled-13-zlib@osx_amd64",
+        "bundled-13-zlib@osx_arm64",
+        "bundled-14-krb5@linux_amd64",
+        "bundled-14-krb5@linux_arm64",
+        "bundled-15-s2n-tls@linux_amd64",
+        "bundled-15-s2n-tls@linux_arm64",
+        "bundled-16-cjson@linux_amd64",
+        "bundled-16-cjson@linux_arm64",
+        "bundled-16-cjson@osx_amd64",
+        "bundled-16-cjson@osx_arm64",
+        "bundled-16-cjson@windows_amd64",
+        "bundled-17-tinyxml2@linux_amd64",
+        "bundled-17-tinyxml2@linux_arm64",
+        "bundled-17-tinyxml2@osx_amd64",
+        "bundled-17-tinyxml2@osx_arm64",
+        "bundled-17-tinyxml2@windows_amd64",
+        "bundled-18-libcbor@linux_amd64",
+        "bundled-18-libcbor@linux_arm64",
+        "bundled-18-libcbor@osx_amd64",
+        "bundled-18-libcbor@osx_arm64",
+        "bundled-18-libcbor@windows_amd64",
+        "bundled-19-xxhash@linux_amd64",
+        "bundled-19-xxhash@linux_arm64",
+        "bundled-19-xxhash@osx_amd64",
+        "bundled-19-xxhash@osx_arm64",
+        "bundled-19-xxhash@windows_amd64",
+        "bundled-20-libpq@linux_amd64",
+        "bundled-20-libpq@linux_arm64",
+        "bundled-20-libpq@osx_amd64",
+        "bundled-20-libpq@osx_arm64",
+        "bundled-20-libpq@windows_amd64",
+        "bundled-21-aws-sdk-cpp@linux_amd64",
+        "bundled-21-aws-sdk-cpp@linux_arm64",
+        "bundled-22-aws-sdk-cpp@osx_amd64",
+        "bundled-22-aws-sdk-cpp@osx_arm64",
+        "bundled-23-aws-sdk-cpp@windows_amd64",
+        "bundled-24-lz4@linux_amd64",
+        "bundled-24-lz4@linux_arm64",
+        "bundled-24-lz4@osx_amd64",
+        "bundled-24-lz4@osx_arm64",
+        "bundled-25-lz4@windows_amd64",
+        "bundled-26-zstd@linux_amd64",
+        "bundled-26-zstd@linux_arm64",
+        "bundled-26-zstd@osx_amd64",
+        "bundled-26-zstd@osx_arm64",
+        "bundled-27-zstd@windows_amd64",
+        "bundled-28-aws-c-common@linux_amd64",
+        "bundled-28-aws-c-common@linux_arm64",
+        "bundled-28-aws-c-common@osx_amd64",
+        "bundled-28-aws-c-common@osx_arm64",
+        "bundled-29-aws-c-common@windows_amd64",
+        "bundled-30-aws-checksums@linux_amd64",
+        "bundled-30-aws-checksums@linux_arm64",
+        "bundled-30-aws-checksums@osx_amd64",
+        "bundled-30-aws-checksums@osx_arm64",
+        "bundled-31-aws-checksums@windows_amd64",
+        "bundled-32-libstdc++@linux_amd64",
+        "bundled-32-libstdc++@linux_arm64",
+        "bundled-33-libgcc@linux_amd64",
+        "bundled-33-libgcc@linux_arm64"
+      ],
+      "ref": "redshift"
+    }
+  ],
+  "metadata": {
+    "component": {
+      "bom-ref": "redshift",
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "name": "redshift",
+      "properties": [
+        {
+          "name": "source-commit",
+          "value": "0f00baadc6a743acdf5415e46be955f5bf2c5a9c"
+        }
+      ],
+      "type": "library",
+      "version": "v1.0.0"
+    },
+    "timestamp": "2026-11-21T03:13:04Z"
+  },
+  "serialNumber": "urn:uuid:271ab739-521a-53dd-956e-b71e6dd10d5a",
+  "specVersion": "1.5",
+  "version": 1
+}

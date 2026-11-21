@@ -1,0 +1,96 @@
+# name: test/client/sql/bulk_fetch.test
+# description: live: stored, a bound varchar(300) value of 300 bytes and the temporal and DECIMAL edges at their widest return exactly
+# group: [sql]
+
+require-env REDSHIFT_TEST_CLIENT odbc
+
+# Live only (test/README.md, "Live variables"): it needs REDSHIFT_TEST_LIVE_REGION and a build with
+# the embedded driver.
+require-env REDSHIFT_TEST_LIVE_REGION
+
+# The account-backed workgroup the live tests reach (test/README.md, "Live variables").
+require-env REDSHIFT_TEST_LIVE_WORKGROUP
+
+require-env REDSHIFT_TEST_LIVE_ACCOUNT_ID
+
+require redshift
+
+# SET TimeZone below is icu's setting, and the test runner loads a linked extension only on require.
+require icu
+
+statement ok
+ATTACH '' AS rs (TYPE redshift, REGION '{REDSHIFT_TEST_LIVE_REGION}', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP '{REDSHIFT_TEST_LIVE_WORKGROUP}', ACCOUNT_ID '{REDSHIFT_TEST_LIVE_ACCOUNT_ID}');
+
+# Every connection sets MaxVarcharSize=0, so the driver reports the declared 300 bytes, and the
+# column is bound at 301. The temporary table lives in the attached connection's session.
+statement ok
+SELECT * FROM redshift_query('rs', 'CREATE TEMP TABLE bulk_fetch_values (v VARCHAR(300), tz TIMETZ, t TIME, d DATE, n NUMERIC(38,10), ts TIMESTAMP, tstz TIMESTAMPTZ)');
+
+statement ok
+SELECT * FROM redshift_query('rs', 'INSERT INTO bulk_fetch_values VALUES (REPEAT(''a'', 300), ''12:34:56.789012+00'', ''23:59:59.999999'', ''4713-01-01 BC'', -9999999999999999999999999999.9999999999, ''4713-01-01 00:00:00.123456 BC'', ''4713-01-01 00:00:00.123456+00 BC'')');
+
+# The 300-byte value arrives untruncated.
+query II
+SELECT length(v), v = repeat('a', 300) FROM redshift_query('rs', 'SELECT v FROM bulk_fetch_values');
+----
+300	true
+
+# TIMESTAMPTZ prints in the session's time zone, so the test fixes it.
+statement ok
+SET TimeZone = 'UTC';
+
+# A stored TIMETZ, a fractional TIME, a BC date, a negative full-precision NUMERIC(38,10), and a BC
+# TIMESTAMP and TIMESTAMPTZ with microseconds, each above the size the driver reports for its type.
+query TTTTTT
+SELECT tz::VARCHAR, t::VARCHAR, d::VARCHAR, n::VARCHAR, ts::VARCHAR, tstz::VARCHAR FROM redshift_query('rs', 'SELECT tz, t, d, n, ts, tstz FROM bulk_fetch_values');
+----
+12:34:56.789012+00	23:59:59.999999	4713-01-01 (BC)	-9999999999999999999999999999.9999999999	4713-01-01 (BC) 00:00:00.123456	4713-01-01 (BC) 00:00:00.123456+00
+
+# The widest edges again, stored, since a stored value can print otherwise than the constants
+# bulk_fetch_constants.test reads (a stored TIMETZ is kept in UTC).
+statement ok
+SELECT * FROM redshift_query('rs', 'CREATE TEMP TABLE bulk_fetch_edges (v VARCHAR(300), tz TIMETZ, n NUMERIC(16,16), n37 NUMERIC(37,37), d DATE, tstz TIMESTAMPTZ)');
+
+statement ok
+SELECT * FROM redshift_query('rs', 'INSERT INTO bulk_fetch_edges VALUES (REPEAT(FROM_VARBYTE(FROM_HEX(''F09F9880''), ''utf8''), 75), ''23:59:59.999999+15:59:59'', -0.9999999999999999, -0.9999999999999999999999999999999999999, ''5874897-12-31'', ''4713-01-01 04:56:02.123456+00 BC'')');
+
+# 75 4-byte characters fill the 300 bytes, which the UTF-8 check passes at the column's full width.
+query II
+SELECT strlen(v), v = repeat(chr(128512), 75) FROM redshift_query('rs', 'SELECT v FROM bulk_fetch_edges');
+----
+300	true
+
+# A stored negative NUMERIC(p,p) is printed with its 0, in p + 3 bytes, its whole bound width (40
+# for NUMERIC(37,37)), and 5874897-12-31 fills a DATE's 13. A stored TIMETZ is moved to UTC by its
+# whole offset, so under the setup's UTC it stays within its 24; the TIMESTAMPTZ arrives as written.
+# DuckDB prints a DECIMAL(p,p) without the 0.
+query TTTTT
+SELECT tz::VARCHAR, n::VARCHAR, n37::VARCHAR, d::VARCHAR, tstz::VARCHAR FROM redshift_query('rs', 'SELECT tz, n, n37, d, tstz FROM bulk_fetch_edges');
+----
+08:00:00.999999+00	-.9999999999999999	-.9999999999999999999999999999999999999	5874897-12-31	4713-01-01 (BC) 04:56:02.123456+00
+
+# In a session time zone whose offset has seconds, as New York's had before 1883-11-18, a stored
+# TIMESTAMPTZ arrives as `4713-01-01 00:00:00.123456-04:56 BC`, 35 of its 38 bytes: the offset
+# loses its seconds, which moves the instant 2 seconds early, as the constant's does. Kolkata's
+# +05:53:28 moves it 28 seconds late. The setup's UTC is restored after.
+statement ok
+SELECT * FROM redshift_query('rs', 'SET timezone TO ''America/New_York''');
+
+query T
+SELECT tstz::VARCHAR FROM redshift_query('rs', 'SELECT tstz FROM bulk_fetch_edges');
+----
+4713-01-01 (BC) 04:56:00.123456+00
+
+statement ok
+SELECT * FROM redshift_query('rs', 'SET timezone TO ''Asia/Kolkata''');
+
+query T
+SELECT tstz::VARCHAR FROM redshift_query('rs', 'SELECT tstz FROM bulk_fetch_edges');
+----
+4713-01-01 (BC) 04:56:30.123456+00
+
+statement ok
+SELECT * FROM redshift_query('rs', 'SET timezone TO ''UTC''');
+
+statement ok
+RESET TimeZone;

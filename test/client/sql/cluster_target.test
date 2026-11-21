@@ -1,0 +1,56 @@
+# name: test/client/sql/cluster_target.test
+# description: live: a provisioned cluster signs in through IAM with no database user and keeps a session's state, and a missing cluster or database gives its not-found message
+# group: [sql]
+
+require-env REDSHIFT_TEST_CLIENT odbc
+
+# Live only (test/README.md, "Live variables"): it needs REDSHIFT_TEST_LIVE_REGION, a build with the
+# embedded driver, and the provisioned cluster the live tests reach there.
+require-env REDSHIFT_TEST_LIVE_REGION
+
+require-env REDSHIFT_TEST_LIVE_CLUSTER
+
+require redshift
+
+statement ok
+ATTACH '' AS rs (TYPE redshift, REGION '{REDSHIFT_TEST_LIVE_REGION}', CREDENTIAL_PROVIDER aws_default_chain, CLUSTER '{REDSHIFT_TEST_LIVE_CLUSTER}');
+
+# No DbUser is sent: GetClusterCredentialsWithIAM names the database user after the IAM identity,
+# IAMR:<role> for a role and IAM:<user> for a user. With no DATABASE the connection uses dev.
+query TT
+SELECT * FROM redshift_query('rs', 'SELECT current_database() AS db, regexp_instr(current_user, ''^IAMR?:.'') = 1 AS iam');
+----
+dev	true
+
+# A caller's SET holds for the next statement on the same session.
+statement ok
+SELECT * FROM redshift_query('rs', 'SET timezone TO ''America/New_York''');
+
+query T
+SELECT * FROM redshift_query('rs', 'SHOW timezone');
+----
+America/New_York
+
+# A new connection keeps none of it and runs the setup.
+query TT con2
+SELECT * FROM redshift_query('rs', 'SELECT current_setting(''timezone'') AS tz, current_setting(''extra_float_digits'') AS digits');
+----
+UTC	2
+
+statement ok
+SELECT * FROM redshift_query('rs', 'RESET timezone');
+
+# GetClusterCredentialsWithIAM answers ClusterNotFound, which the availability classifier reads. The
+# runner adds a newline before it full-matches.
+
+statement error
+ATTACH '' AS rs_missing (TYPE redshift, REGION '{REDSHIFT_TEST_LIVE_REGION}', CREDENTIAL_PROVIDER aws_default_chain, CLUSTER 'duckdb-redshift-test-no-such-cluster');
+----
+<REGEX>:(?s)IO Error: Cannot attach rs_missing: Could not connect to Redshift at [^\n]*cluster duckdb-redshift-test-no-such-cluster[^\n]*: the Redshift cluster was not found\.\nThe Redshift cluster may not exist or may be paused; check CLUSTER and REGION\.\nSQLSTATE: HY000\n.*
+
+# The cluster was found and the credentials worked, so only the database is wrong: Redshift's 3D000.
+
+statement error
+ATTACH '' AS rs_no_database (TYPE redshift, REGION '{REDSHIFT_TEST_LIVE_REGION}', CREDENTIAL_PROVIDER aws_default_chain, CLUSTER '{REDSHIFT_TEST_LIVE_CLUSTER}', DATABASE 'duckdb_redshift_test_no_such_database');
+----
+<REGEX>:(?s)IO Error: Cannot attach rs_no_database: Could not connect to Redshift at [^\n]*database duckdb_redshift_test_no_such_database[^\n]*: the database was not found on the Redshift cluster\.\nCheck DATABASE, or the database in the path, against the databases the cluster has\.\nSQLSTATE: 3D000\n.*

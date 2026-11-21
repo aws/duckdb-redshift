@@ -1,0 +1,885 @@
+# name: test/mock/attach.test
+# description: ATTACH '' ... (TYPE redshift, ...): configuration resolution, the handle's lifecycle, and the catalog refusal
+# group: [mock]
+
+require-env REDSHIFT_TEST_CLIENT mock
+
+# An ATTACH that names the type before the extension is loaded loads the extension of that name,
+# redshift. Whether it is found depends on how the unit tester has it (linked in, or the
+# loadable file in a repository), so that case is not here: cpp/test_attach_handle.cpp checks it
+# for the linked-in extension, and make test_mock_loadable for the installed file.
+require redshift
+
+# The values a resolved configuration holds are checked by the C++ tests in
+# cpp/test_attach_config.cpp. From SQL, only whether ATTACH succeeds is visible. A configuration is
+# given as options on each ATTACH: there is no redshift secret type, and SECRET names an aws
+# or s3 secret, which this build does not register (the C++ tests use stand-ins for them).
+
+# ---------------------------------------------------------------------------
+# ATTACH, duckdb_databases() and DETACH: DuckDB's attached-database lifecycle.
+# ---------------------------------------------------------------------------
+
+# Options only, for a Serverless workgroup and for a provisioned cluster. Option names are
+# case-insensitive, and CREDENTIAL_PROVIDER's keyword may be written bare or as a string.
+statement ok
+ATTACH '' AS rs_direct (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'wg', ACCOUNT_ID '012345678901');
+
+statement ok
+ATTACH '' AS rs_cluster (TYPE redshift, region 'us-east-1', Credential_Provider 'profile', profile 'p', cluster 'c', database 'd');
+
+statement ok
+DETACH rs_cluster;
+
+# The type name in any letter case.
+statement ok
+ATTACH '' AS rs_profile (TYPE redshift, REGION 'us-west-2', CREDENTIAL_PROVIDER profile, PROFILE 'analytics', CLUSTER 'etl');
+
+statement ok
+ATTACH '' AS rs_upper_type (TYPE REDSHIFT, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'wg', ACCOUNT_ID '012345678901');
+
+# Two handles on one configuration are separate attached databases.
+statement ok
+ATTACH '' AS rs_profile_again (TYPE redshift, REGION 'us-west-2', CREDENTIAL_PROVIDER profile, PROFILE 'analytics', CLUSTER 'etl');
+
+query TTT
+SELECT database_name, path, type FROM duckdb_databases() WHERE type = 'redshift' ORDER BY database_name;
+----
+rs_direct	(empty)	redshift
+rs_profile	(empty)	redshift
+rs_profile_again	(empty)	redshift
+rs_upper_type	(empty)	redshift
+
+# A handle lists no schemas, tables or other entries.
+query I
+SELECT count(*) FROM duckdb_schemas() WHERE database_name LIKE 'rs_%';
+----
+0
+
+query I
+SELECT count(*) FROM duckdb_tables() WHERE database_name LIKE 'rs_%';
+----
+0
+
+# Reports that cover every attached database still work with a handle attached. A handle stores
+# nothing locally, so its size is zero.
+statement ok
+PRAGMA database_size;
+
+query TII
+SELECT database_size, block_size, total_blocks FROM pragma_database_size() WHERE database_name = 'rs_direct';
+----
+0 bytes	0	0
+
+statement ok
+SHOW ALL TABLES;
+
+statement ok
+CHECKPOINT rs_direct;
+
+statement ok
+DETACH rs_profile_again;
+
+statement ok
+DETACH rs_upper_type;
+
+query T
+SELECT database_name FROM duckdb_databases() WHERE type = 'redshift' ORDER BY database_name;
+----
+rs_direct
+rs_profile
+
+# The alias is free again after DETACH.
+statement ok
+ATTACH '' AS rs_profile_again (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'wg', ACCOUNT_ID '012345678901');
+
+statement ok
+DETACH rs_profile_again;
+
+statement error
+DETACH rs_profile_again;
+----
+Failed to detach database with name "rs_profile_again": database not found
+
+# ATTACH OR REPLACE always replaces the handle, even with the same options, and runs the attach
+# callback again, so new options are used and anything ATTACH refuses is refused.
+statement ok
+ATTACH '' AS rs_replace (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'wg', ACCOUNT_ID '012345678901');
+
+statement ok
+CREATE TABLE replace_oids AS SELECT database_oid AS oid FROM duckdb_databases() WHERE database_name = 'rs_replace';
+
+statement ok
+ATTACH OR REPLACE '' AS rs_replace (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'wg', ACCOUNT_ID '012345678901');
+
+statement ok
+INSERT INTO replace_oids SELECT database_oid FROM duckdb_databases() WHERE database_name = 'rs_replace';
+
+statement ok
+ATTACH OR REPLACE '' AS rs_replace (TYPE redshift, REGION 'us-west-2', CREDENTIAL_PROVIDER profile, PROFILE 'analytics', CLUSTER 'etl');
+
+statement ok
+INSERT INTO replace_oids SELECT database_oid FROM duckdb_databases() WHERE database_name = 'rs_replace';
+
+query II
+SELECT count(*), count(DISTINCT oid) FROM replace_oids;
+----
+3	3
+
+statement error
+ATTACH OR REPLACE '' AS rs_replace (TYPE redshift, SECRET rs_missing, CLUSTER 'c');
+----
+Invalid Configuration Error: Cannot attach rs_replace: the aws or s3 secret the ATTACH named in SECRET, or chose for a cluster identifier path, does not exist: SECRET must name a DuckDB secret of type aws or s3
+
+statement error
+ATTACH OR REPLACE '' AS rs_replace (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'wg', ACCOUNT_ID '012345678901', HOSTNAME 'example.com');
+----
+Invalid Configuration Error: Cannot attach rs_replace: Invalid ATTACH option 'HOSTNAME'
+
+# A replacement resolves its configuration again: one without a target is refused.
+statement error
+ATTACH OR REPLACE '' AS rs_replace (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain);
+----
+Cannot attach rs_replace: Missing target
+
+# A refused replacement leaves the existing handle attached.
+query I
+SELECT count(*) FROM duckdb_databases() WHERE database_name = 'rs_replace';
+----
+1
+
+# ATTACH IF NOT EXISTS keeps the existing handle, even with other options.
+statement ok
+DELETE FROM replace_oids;
+
+statement ok
+INSERT INTO replace_oids SELECT database_oid FROM duckdb_databases() WHERE database_name = 'rs_replace';
+
+statement ok
+ATTACH IF NOT EXISTS '' AS rs_replace (TYPE redshift, REGION 'us-west-2', CREDENTIAL_PROVIDER profile, PROFILE 'analytics', CLUSTER 'etl');
+
+statement ok
+INSERT INTO replace_oids SELECT database_oid FROM duckdb_databases() WHERE database_name = 'rs_replace';
+
+# It returns the existing handle without running the attach callback, so the options it is given
+# are not checked: an unknown option, and a configuration with no target, are accepted and have no
+# effect.
+statement ok
+ATTACH IF NOT EXISTS '' AS rs_replace (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'wg', ACCOUNT_ID '012345678901', HOSTNAME 'example.com');
+
+statement ok
+ATTACH IF NOT EXISTS '' AS rs_replace (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain);
+
+statement ok
+INSERT INTO replace_oids SELECT database_oid FROM duckdb_databases() WHERE database_name = 'rs_replace';
+
+query II
+SELECT count(*), count(DISTINCT oid) FROM replace_oids;
+----
+3	1
+
+statement ok
+DROP TABLE replace_oids;
+
+statement ok
+DETACH rs_replace;
+
+# ---------------------------------------------------------------------------
+# Target combinations.
+# ---------------------------------------------------------------------------
+
+# An ATTACH must name a target.
+statement error
+ATTACH '' AS rs_bad (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain);
+----
+Invalid Configuration Error: Cannot attach rs_bad: Missing target: give WORKGROUP with ACCOUNT_ID for a Serverless workgroup or CLUSTER for a provisioned cluster, or the endpoint as a redshift:// path
+
+statement error
+ATTACH '' AS rs_bad (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain);
+----
+Cannot attach rs_bad: Missing target
+
+# A DATABASE without a target is no target either.
+statement error
+ATTACH '' AS rs_bad (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, DATABASE 'sales');
+----
+Cannot attach rs_bad: Missing target
+
+statement error
+ATTACH '' AS rs_bad (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, DATABASE 'sales');
+----
+Cannot attach rs_bad: Missing target
+
+statement error
+ATTACH '' AS rs_bad (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'wg', ACCOUNT_ID '012345678901', CLUSTER 'c');
+----
+Invalid Configuration Error: Cannot attach rs_bad: Invalid parameter 'CLUSTER': it is not valid with WORKGROUP
+
+statement error
+ATTACH '' AS rs_bad (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, ACCOUNT_ID '012345678901');
+----
+Cannot attach rs_bad: Invalid parameter 'ACCOUNT_ID': it is only valid with WORKGROUP
+
+statement error
+ATTACH '' AS rs_bad (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'arn:aws:redshift-serverless:us-east-1:012345678901:workgroup/x', ACCOUNT_ID '012345678901');
+----
+Cannot attach rs_bad: Invalid value 'arn:aws:redshift-serverless:us-east-1:012345678901:workgroup/x' for parameter 'WORKGROUP'
+
+# This build's hook accepts no workgroup without ACCOUNT_ID.
+statement error
+ATTACH '' AS rs_bad (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'wg');
+----
+Invalid Configuration Error: Cannot attach rs_bad: Missing required parameter 'ACCOUNT_ID': WORKGROUP needs the 12-digit ID of the AWS account that owns the workgroup
+
+# ---------------------------------------------------------------------------
+# Refusals. A failed ATTACH attaches nothing.
+# ---------------------------------------------------------------------------
+
+# A path other than a cluster identifier, a redshift:// endpoint or a workgroup endpoint's ARN is
+# refused, with this extension's own forms as the remedy (attach_path.test has those forms).
+statement error
+ATTACH 'region=us-east-1 credential_provider=aws_default_chain' AS rs_bad (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'wg', ACCOUNT_ID '012345678901');
+----
+Invalid Configuration Error: Cannot attach rs_bad: the path must be empty, a redshift:// endpoint or a workgroup endpoint's ARN. Give the configuration as options: ATTACH '' AS rs_bad (TYPE redshift, REGION '<region>', ...), or the endpoint: ATTACH 'redshift://<endpoint>[:<port>][/<database>]' AS rs_bad (TYPE redshift, ...)
+
+# The handle is quoted where it needs it, in the prefix and in the example a user may copy.
+statement error
+ATTACH 'x.duckdb' AS "My H" (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'wg', ACCOUNT_ID '012345678901');
+----
+Invalid Configuration Error: Cannot attach "My H": the path must be empty, a redshift:// endpoint or a workgroup endpoint's ARN. Give the configuration as options: ATTACH '' AS "My H" (TYPE redshift, REGION '<region>', ...), or the endpoint: ATTACH 'redshift://<endpoint>[:<port>][/<database>]' AS "My H" (TYPE redshift, ...)
+
+# The path is never repeated: it may hold anything.
+statement error
+ATTACH 'PATH_SENTINEL' AS rs_bad (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'wg', ACCOUNT_ID '012345678901');
+----
+<!REGEX>:(?s).*PATH_SENTINEL.*
+
+# The options alone must be a complete configuration.
+statement error
+ATTACH '' AS rs_bad (TYPE redshift, REGION 'us-east-1', CLUSTER 'c');
+----
+Invalid Configuration Error: Cannot attach rs_bad: Missing required parameter 'CREDENTIAL_PROVIDER'
+
+statement error
+ATTACH '' AS rs_bad (TYPE redshift);
+----
+Invalid Configuration Error: Cannot attach rs_bad: Missing required parameter 'REGION'
+
+# Every configuration option is a string. A value of another type is refused by name, never cast,
+# so an unquoted ACCOUNT_ID cannot lose a leading zero.
+statement error
+ATTACH '' AS rs_bad (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'wg', ACCOUNT_ID 012345678901);
+----
+Invalid Configuration Error: Cannot attach rs_bad: Invalid value for parameter 'ACCOUNT_ID': it must be a string; quote it, like ACCOUNT_ID '<value>'
+
+foreach option REGION CREDENTIAL_PROVIDER PROFILE WORKGROUP ACCOUNT_ID CLUSTER DATABASE
+
+statement error
+ATTACH '' AS rs_bad (TYPE redshift, {option} 1);
+----
+it must be a string; quote it, like
+
+statement error
+ATTACH '' AS rs_bad (TYPE redshift, {option} true);
+----
+it must be a string; quote it, like
+
+statement error
+ATTACH '' AS rs_bad (TYPE redshift, {option} '');
+----
+it cannot be empty
+
+endloop
+
+# DuckDB's parser refuses a repeated option, in any letter case, before the extension sees it.
+statement error
+ATTACH '' AS rs_bad (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'wg', ACCOUNT_ID '012345678901', CLUSTER 'a', cluster 'b');
+----
+duplicate option
+
+# SECRET names an existing aws or s3 secret, the AWS credentials' one source beside
+# CREDENTIAL_PROVIDER. An empty name is refused, not read as no SECRET.
+statement error
+ATTACH '' AS rs_bad (TYPE redshift, REGION 'us-east-1', CLUSTER 'c', SECRET '');
+----
+Invalid Configuration Error: Cannot attach rs_bad: Invalid value '' for parameter 'SECRET': it cannot be empty
+
+statement error
+ATTACH '' AS rs_bad (TYPE redshift, REGION 'us-east-1', CLUSTER 'c', SECRET rs_missing);
+----
+Invalid Configuration Error: Cannot attach rs_bad: the aws or s3 secret the ATTACH named in SECRET, or chose for a cluster identifier path, does not exist: SECRET must name a DuckDB secret of type aws or s3
+
+# SECRET and CREDENTIAL_PROVIDER are each a credential source: one of them, never both or neither.
+statement error
+ATTACH '' AS rs_bad (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, CLUSTER 'c', SECRET rs_missing);
+----
+Invalid Configuration Error: Cannot attach rs_bad: Invalid parameter 'CREDENTIAL_PROVIDER': it is not valid with SECRET, whose aws or s3 secret gives the AWS credentials
+
+statement error
+ATTACH '' AS rs_bad (TYPE redshift, REGION 'us-east-1', PROFILE 'p', CLUSTER 'c', SECRET rs_missing);
+----
+Invalid Configuration Error: Cannot attach rs_bad: Invalid parameter 'PROFILE': it is only valid with CREDENTIAL_PROVIDER profile
+
+statement error
+ATTACH '' AS rs_bad (TYPE redshift, REGION 'us-east-1', CLUSTER 'c');
+----
+Invalid Configuration Error: Cannot attach rs_bad: Missing required parameter 'CREDENTIAL_PROVIDER': supported values {aws_default_chain, profile}, or name a DuckDB aws or s3 secret in SECRET
+
+# CREDENTIAL_PROVIDER takes no aws_secret keyword, and AWS_SECRET is no option: SECRET names the
+# secret.
+statement error
+ATTACH '' AS rs_bad (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_secret, CLUSTER 'c');
+----
+Invalid Configuration Error: Cannot attach rs_bad: Invalid value 'aws_secret' for parameter 'CREDENTIAL_PROVIDER': supported values {aws_default_chain, profile}
+
+statement error
+ATTACH '' AS rs_bad (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_secret, CLUSTER 'c');
+----
+<!REGEX>:(?s).*only IAM authentication.*
+
+statement error
+ATTACH '' AS rs_bad (TYPE redshift, REGION 'us-east-1', AWS_SECRET 'creds', CLUSTER 'c');
+----
+Invalid Configuration Error: Cannot attach rs_bad: Invalid ATTACH option 'AWS_SECRET'
+
+statement error
+ATTACH '' AS rs_bad (TYPE redshift, REGION 'us-east-1', AWS_SECRET 'creds', CLUSTER 'c');
+----
+<!REGEX>:(?s).*only IAM authentication.*
+
+# A secret of another type is refused, here a core http secret.
+statement ok
+CREATE SECRET rs_http (TYPE http, BEARER_TOKEN 'x');
+
+statement error
+ATTACH '' AS rs_bad (TYPE redshift, REGION 'us-east-1', CLUSTER 'c', SECRET rs_http);
+----
+Invalid Configuration Error: Cannot attach rs_bad: secret 'rs_http' has type 'http': SECRET must name a secret of type aws or s3
+
+statement ok
+DROP SECRET rs_http;
+
+statement error
+ATTACH '' AS rs_bad (TYPE redshift, SECRET 42);
+----
+Invalid Configuration Error: Cannot attach rs_bad: Invalid value for parameter 'SECRET': it must be the name of a DuckDB secret of type aws or s3
+
+# A SECRET that is not a string is never repeated in the error, so credentials a user passed
+# inline by mistake do not end up in it.
+statement error
+ATTACH '' AS rs_bad (TYPE redshift, SECRET {'key_id': 'AKIA_SENTINEL', 'secret': 'hunter2'});
+----
+Invalid value for parameter 'SECRET': it must be the name of a DuckDB secret of type aws or s3
+
+statement error
+ATTACH '' AS rs_bad (TYPE redshift, SECRET {'key_id': 'AKIA_SENTINEL', 'secret': 'hunter2'});
+----
+<!REGEX>:(?s).*(AKIA_SENTINEL|hunter2|key_id).*
+
+statement error
+ATTACH '' AS rs_bad (TYPE redshift, SECRET NULL);
+----
+NULL
+
+# Options DuckDB does not know, other than SECRET, the configuration options, the aws extension's and the
+# ignored ones, are refused, not
+# ignored.
+statement error
+ATTACH '' AS rs_bad (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'wg', ACCOUNT_ID '012345678901', HOSTNAME 'example.com');
+----
+Invalid Configuration Error: Cannot attach rs_bad: Invalid ATTACH option 'HOSTNAME'
+
+statement error
+ATTACH '' AS rs_bad (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'wg', ACCOUNT_ID '012345678901', HOSTNAME 'example.com');
+----
+<!REGEX>:(?s).*only IAM authentication.*
+
+# An unknown option that asks for a sign-in other than IAM says that only IAM is supported, and
+# repeats only its name, never its value. Since an expected error matches as a substring, the
+# HOSTNAME refusal just above and the AWS_SECRET and aws_secret ones earlier in this file are each
+# checked again for the hint's absence.
+statement error
+ATTACH '' AS rs_bad (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'wg', ACCOUNT_ID '012345678901', PLUGIN_NAME 'PLACEHOLDER_SECRET');
+----
+Invalid Configuration Error: Cannot attach rs_bad: Invalid ATTACH option 'PLUGIN_NAME': only IAM authentication is supported, with AWS credentials from CREDENTIAL_PROVIDER or from a DuckDB aws or s3 secret in SECRET, which can hold those of an IAM Identity Center sign-in; the Redshift driver's own sign-in plugins, for IAM Identity Center or an identity provider such as Okta, and a database user and password are not
+
+statement error
+ATTACH '' AS rs_bad (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'wg', ACCOUNT_ID '012345678901', IDC_REGION 'PLACEHOLDER_SECRET', TOKEN 'PLACEHOLDER_SECRET', PASSWORD 'PLACEHOLDER_SECRET');
+----
+Cannot attach rs_bad: Invalid ATTACH option 'IDC_REGION': only IAM authentication is supported
+
+statement error
+ATTACH '' AS rs_bad (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'wg', ACCOUNT_ID '012345678901', IDC_REGION 'PLACEHOLDER_SECRET', TOKEN 'PLACEHOLDER_SECRET', PASSWORD 'PLACEHOLDER_SECRET');
+----
+<!REGEX>:(?s).*PLACEHOLDER_SECRET.*
+
+# Such an option is reported before any other unknown one, so a user and password setup gets the hint
+# though HOSTNAME sorts first.
+statement error
+ATTACH '' AS rs_bad (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'wg', ACCOUNT_ID '012345678901', HOSTNAME 'PLACEHOLDER_HOST', USER 'PLACEHOLDER_USER', PASSWORD 'PLACEHOLDER_SECRET');
+----
+Cannot attach rs_bad: Invalid ATTACH option 'PASSWORD': only IAM authentication is supported
+
+statement error
+ATTACH '' AS rs_bad (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER idc, WORKGROUP 'wg', ACCOUNT_ID '012345678901');
+----
+Invalid Configuration Error: Cannot attach rs_bad: Invalid value 'idc' for parameter 'CREDENTIAL_PROVIDER': supported values {aws_default_chain, profile}; only IAM authentication is supported, with AWS credentials from CREDENTIAL_PROVIDER or from a DuckDB aws or s3 secret in SECRET, which can hold those of an IAM Identity Center sign-in; the Redshift driver's own sign-in plugins, for IAM Identity Center or an identity provider such as Okta, and a database user and password are not
+
+# Names are checked before values, so a sign-in asked for only in CREDENTIAL_PROVIDER's value, beside
+# an unknown option, gets that option's plain refusal.
+statement error
+ATTACH '' AS rs_bad (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER idc, WORKGROUP 'wg', ACCOUNT_ID '012345678901', HOSTNAME 'x');
+----
+Invalid Configuration Error: Cannot attach rs_bad: Invalid ATTACH option 'HOSTNAME'
+
+statement error
+ATTACH '' AS rs_bad (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER idc, WORKGROUP 'wg', ACCOUNT_ID '012345678901', HOSTNAME 'x');
+----
+<!REGEX>:(?s).*only IAM authentication.*
+
+# With several problems and no option that asks for a sign-in other than IAM, the first unknown
+# option in sorted order is reported, and the values are only checked after the names.
+statement error
+ATTACH '' AS rs_bad (TYPE redshift, SECRET 42, REGION 1, ZZZ 1, BBB 1, HOSTNAME 'x');
+----
+Invalid Configuration Error: Cannot attach rs_bad: Invalid ATTACH option 'BBB'
+
+# A read-only handle is refused, however it is written, and the refusal names the option and
+# value that asked for it. An explicitly read-write one is not refused.
+statement error
+ATTACH '' AS rs_bad (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'wg', ACCOUNT_ID '012345678901', READ_ONLY);
+----
+Invalid Configuration Error: Cannot attach rs_bad: Invalid value true for ATTACH option 'READ_ONLY': a Redshift handle cannot be read-only. For read-only access, use Redshift credentials with only SELECT grants
+
+statement error
+ATTACH '' AS rs_bad (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'wg', ACCOUNT_ID '012345678901', READONLY true);
+----
+Invalid value true for ATTACH option 'READONLY'
+
+statement error
+ATTACH '' AS rs_bad (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'wg', ACCOUNT_ID '012345678901', READ_WRITE false);
+----
+Invalid value false for ATTACH option 'READ_WRITE'
+
+statement error
+ATTACH '' AS rs_bad (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'wg', ACCOUNT_ID '012345678901', READWRITE false);
+----
+Invalid value false for ATTACH option 'READWRITE'
+
+# With several access-mode options, the one that asks for read-only is named, not the one that
+# does not.
+statement error
+ATTACH '' AS rs_bad (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'wg', ACCOUNT_ID '012345678901', READ_ONLY false, READWRITE false);
+----
+Invalid value false for ATTACH option 'READWRITE'
+
+# SECRET's type is checked before the read-only options, but an empty or unknown SECRET is part of
+# the configuration, which is resolved after them.
+statement error
+ATTACH '' AS rs_bad (TYPE redshift, SECRET '', READ_ONLY);
+----
+Cannot attach rs_bad: Invalid value true for ATTACH option 'READ_ONLY'
+
+# The rest of the check order, one pair at a time: SECRET's type before the configuration options'
+# values, those values before the read-only options, and the read-only options before the path.
+statement error
+ATTACH '' AS rs_bad (TYPE redshift, SECRET 42, REGION 1);
+----
+Cannot attach rs_bad: Invalid value for parameter 'SECRET': it must be the name of a DuckDB secret of type aws or s3
+
+statement error
+ATTACH '' AS rs_bad (TYPE redshift, REGION 1, READ_ONLY);
+----
+Cannot attach rs_bad: Invalid value for parameter 'REGION': it must be a string
+
+statement error
+ATTACH 'x.duckdb' AS rs_bad (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'wg', ACCOUNT_ID '012345678901', READ_ONLY);
+----
+Cannot attach rs_bad: Invalid value true for ATTACH option 'READ_ONLY'
+
+statement ok
+ATTACH '' AS rs_rw (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'wg', ACCOUNT_ID '012345678901', READ_ONLY false);
+
+statement ok
+DETACH rs_rw;
+
+statement ok
+ATTACH '' AS rs_rw (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'wg', ACCOUNT_ID '012345678901', READWRITE true);
+
+statement ok
+DETACH rs_rw;
+
+query I
+SELECT count(*) FROM duckdb_databases() WHERE database_name = 'rs_bad';
+----
+0
+
+# ---------------------------------------------------------------------------
+# AS is required for the empty path. Without it, DuckDB names the empty path memory, the name of its default
+# database, so the handle name memory is refused in any letter case, and the main database and
+# its tables stay in place.
+# ---------------------------------------------------------------------------
+statement ok
+CREATE TABLE main_kept AS SELECT 1 AS i;
+
+statement error
+ATTACH '' (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'wg', ACCOUNT_ID '012345678901');
+----
+name the handle: ATTACH '' AS <handle> (TYPE redshift, ...)
+
+statement error
+ATTACH '' AS memory (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'wg', ACCOUNT_ID '012345678901');
+----
+Invalid Configuration Error: Invalid ATTACH: a Redshift handle cannot be named memory, which is DuckDB's default database; name the handle: ATTACH '' AS <handle> (TYPE redshift, ...)
+
+# The name is checked before the options, so a missing AS is what an unknown option meets first.
+statement error
+ATTACH '' (TYPE redshift, HOSTNAME 'x');
+----
+name the handle: ATTACH '' AS <handle> (TYPE redshift, ...)
+
+statement error
+ATTACH OR REPLACE '' (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'wg', ACCOUNT_ID '012345678901');
+----
+name the handle: ATTACH '' AS <handle> (TYPE redshift, ...)
+
+statement error
+ATTACH OR REPLACE '' AS MEMORY (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'wg', ACCOUNT_ID '012345678901');
+----
+name the handle: ATTACH '' AS <handle> (TYPE redshift, ...)
+
+# ATTACH IF NOT EXISTS without AS returns the existing memory database; the extension never runs.
+statement ok
+ATTACH IF NOT EXISTS '' (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'wg', ACCOUNT_ID '012345678901');
+
+query TT
+SELECT database_name, type FROM duckdb_databases() WHERE database_name = 'memory';
+----
+memory	duckdb
+
+query I
+SELECT i FROM memory.main.main_kept;
+----
+1
+
+statement ok
+DROP TABLE main_kept;
+
+# ---------------------------------------------------------------------------
+# There is no redshift secret type: CREATE SECRET refuses it, and an ATTACH uses only its own
+# options.
+# ---------------------------------------------------------------------------
+statement error
+CREATE SECRET rs_cfg (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, CLUSTER 'c');
+----
+redshift
+
+statement error
+ATTACH '' AS rs_bad (TYPE redshift);
+----
+Invalid Configuration Error: Cannot attach rs_bad: Missing required parameter 'REGION'
+
+# ---------------------------------------------------------------------------
+# The handle is not a browsable catalog: qualified references direct the user to redshift_query.
+# ---------------------------------------------------------------------------
+statement error
+SELECT * FROM rs_direct.public.users;
+----
+Catalog Error: Redshift handle "rs_direct" cannot be browsed as a catalog: catalog access is not available. Query Redshift through the handle with redshift_query('rs_direct', '<Redshift SQL>')
+
+statement error
+SELECT * FROM rs_direct.users;
+----
+Redshift handle "rs_direct" cannot be browsed as a catalog
+
+# An unquoted file name that starts with the handle's name, such as rs_direct.csv, parses like any
+# two-part reference to the handle, which DuckDB checks before reading it as a file. So every
+# two-part reference is refused with a hint to quote it, in case it is a file.
+statement error
+SELECT * FROM rs_direct.csv;
+----
+Catalog Error: Redshift handle "rs_direct" cannot be browsed as a catalog: catalog access is not available. Query Redshift through the handle with redshift_query('rs_direct', '<Redshift SQL>'). If rs_direct.csv is a file, quote it like 'rs_direct.csv'
+
+statement error
+SELECT * FROM rs_direct.users;
+----
+If rs_direct.users is a file, quote it like 'rs_direct.users'
+
+# A three-part reference gets no hint.
+statement error
+SELECT * FROM rs_direct.public.users;
+----
+<!REGEX>:(?s).*is a file.*
+
+# Quoted, it is read as a file, as without a handle.
+statement ok
+COPY (SELECT 1 AS a) TO '{TEST_DIR}/rs_direct.csv';
+
+query I
+SELECT a FROM '{TEST_DIR}/rs_direct.csv';
+----
+1
+
+statement error
+CREATE TABLE rs_direct.public.t (i INTEGER);
+----
+Redshift handle "rs_direct" cannot be browsed as a catalog
+
+statement error
+CREATE SCHEMA rs_direct.s;
+----
+Redshift handle "rs_direct" cannot be browsed as a catalog
+
+statement error
+DROP TABLE rs_direct.public.users;
+----
+Redshift handle "rs_direct" cannot be browsed as a catalog
+
+statement error
+INSERT INTO rs_direct.public.users VALUES (1);
+----
+Redshift handle "rs_direct" cannot be browsed as a catalog
+
+statement error
+SELECT rs_direct.public.f(1);
+----
+Redshift handle "rs_direct" cannot be browsed as a catalog
+
+# USE probes for the schema without requiring it, so the refusal is DuckDB's own; it still fails.
+statement error
+USE rs_direct;
+----
+No catalog + schema named "rs_direct" found
+
+# Nor can the search path name a schema of the handle, which the catalog relies on to recognize a
+# two-part reference by its default schema.
+statement error
+SET search_path = 'rs_direct.main';
+----
+No catalog + schema named "rs_direct.main" found
+
+# CONNECT, new in DuckDB v2.0, is not catalog access either: it sends each statement to Redshift as
+# its text (test/mock/connect.test), so DuckDB resolves no name through the handle.
+statement ok
+CONNECT rs_direct;
+
+statement ok
+DISCONNECT;
+
+# What else a non-browsable handle costs, besides `<handle>.<file>` above.
+
+# It lists no tables.
+query I
+SELECT count(*) FROM (SHOW TABLES FROM rs_direct);
+----
+0
+
+# A table alias with the handle's name binds to the table, not to the handle.
+statement ok
+CREATE TABLE rs_alias_t AS SELECT 1 AS a;
+
+query I
+SELECT rs_direct.a FROM rs_alias_t AS rs_direct;
+----
+1
+
+statement ok
+DROP TABLE rs_alias_t;
+
+# A dot call on a column of such an alias fails while the handle refuses every lookup, since DuckDB
+# first looks the function up in the handle. Calling the function directly works.
+statement error
+SELECT rs_direct.a.upper() FROM (SELECT 'x' AS a) AS rs_direct;
+----
+Redshift handle "rs_direct" cannot be browsed as a catalog
+
+query T
+SELECT upper(rs_direct.a) FROM (SELECT 'x' AS a) AS rs_direct;
+----
+X
+
+# So does a two-part dot call on a column named like the handle, which fails with any catalog of
+# that name. upper(rs_direct) works.
+statement error
+SELECT rs_direct.upper() FROM (SELECT 'x' AS rs_direct);
+----
+Redshift handle "rs_direct" cannot be browsed as a catalog
+
+query T
+SELECT upper(rs_direct) FROM (SELECT 'x' AS rs_direct);
+----
+X
+
+# A local schema with the handle's name makes `<name>.<table>` ambiguous, as it does for any
+# catalog of that name. The fully qualified local name still works.
+statement ok
+CREATE SCHEMA memory.rs_direct;
+
+statement ok
+CREATE TABLE memory.rs_direct.t AS SELECT 1 AS a;
+
+statement error
+SELECT a FROM rs_direct.t;
+----
+Ambiguous reference to catalog or schema "rs_direct"
+
+query I
+SELECT a FROM memory.rs_direct.t;
+----
+1
+
+statement ok
+DROP SCHEMA memory.rs_direct CASCADE;
+
+# ---------------------------------------------------------------------------
+# DuckDB's own options are accepted, as for any attached database. A handle has no default table,
+# so a reference DuckDB resolves through DEFAULT_TABLE fails, whether or not a local table or view
+# has the handle's name. A local one is then reached through its schema.
+# ---------------------------------------------------------------------------
+
+# A local table with the handle's name: DuckDB checks the handle's default table for ambiguity.
+statement ok
+CREATE TABLE rs_dt_local AS SELECT 1 AS i;
+
+statement ok
+ATTACH '' AS rs_dt_local (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'wg', ACCOUNT_ID '012345678901', DEFAULT_TABLE 'x');
+
+statement error
+SELECT i FROM rs_dt_local;
+----
+Catalog Error: Redshift handle "rs_dt_local" has no default table; query it with redshift_query('rs_dt_local', ...). For a local table "rs_dt_local", qualify it with its schema
+
+query I
+SELECT i FROM main.rs_dt_local;
+----
+1
+
+statement ok
+DETACH rs_dt_local;
+
+# Without DEFAULT_TABLE, the local table is read as usual.
+statement ok
+ATTACH '' AS rs_dt_local (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'wg', ACCOUNT_ID '012345678901');
+
+query I
+SELECT i FROM rs_dt_local;
+----
+1
+
+# ATTACH IF NOT EXISTS sets DEFAULT_TABLE on the existing handle without running the attach
+# callback; the reference fails the same way.
+statement ok
+ATTACH IF NOT EXISTS '' AS rs_dt_local (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'wg', ACCOUNT_ID '012345678901', DEFAULT_TABLE 'x');
+
+statement error
+SELECT i FROM rs_dt_local;
+----
+Redshift handle "rs_dt_local" has no default table
+
+statement ok
+DETACH rs_dt_local;
+
+statement ok
+DROP TABLE rs_dt_local;
+
+# No local table with the handle's name: DuckDB falls back to the handle's default table.
+statement ok
+ATTACH '' AS rs_dt (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'wg', ACCOUNT_ID '012345678901', DEFAULT_TABLE 'x');
+
+statement error
+SELECT * FROM rs_dt;
+----
+Catalog Error: Redshift handle "rs_dt" has no default table
+
+statement ok
+DETACH rs_dt;
+
+# HIDDEN takes effect; RECOVERY_MODE and VACUUM_REBUILD_INDEXES are accepted and have nothing to
+# apply to.
+statement ok
+ATTACH '' AS rs_hidden (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'wg', ACCOUNT_ID '012345678901', HIDDEN);
+
+query I
+SELECT count(*) FROM duckdb_databases() WHERE database_name = 'rs_hidden';
+----
+0
+
+statement ok
+DETACH rs_hidden;
+
+statement ok
+ATTACH '' AS rs_opts (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'wg', ACCOUNT_ID '012345678901', RECOVERY_MODE 'no_wal_writes', VACUUM_REBUILD_INDEXES 1);
+
+statement ok
+DETACH rs_opts;
+
+# ---------------------------------------------------------------------------
+# DuckDB transactions. A refused lookup in the handle is a catalog error. Since DuckDB v2.0 any
+# error aborts an explicit transaction by default (default_transaction_invalidation_policy is
+# ALL_ERRORS_INVALIDATE_TRANSACTION), so the refusal behaves like every other error: the local
+# work is lost and COMMIT ends the transaction without keeping it. Under
+# SYNTACTIC_ERRORS_DO_NOT_INVALIDATE, v1.5's behaviour, the refusal leaves the transaction usable:
+# COMMIT keeps and ROLLBACK discards the local work around it.
+# ---------------------------------------------------------------------------
+statement ok
+BEGIN;
+
+statement ok
+CREATE TABLE aborted AS SELECT 1 AS i;
+
+statement error
+SELECT * FROM rs_direct.public.users;
+----
+cannot be browsed as a catalog
+
+statement error
+SELECT 1;
+----
+Current transaction is aborted
+
+statement ok
+COMMIT;
+
+statement ok
+SET default_transaction_invalidation_policy = 'SYNTACTIC_ERRORS_DO_NOT_INVALIDATE';
+
+statement ok
+BEGIN;
+
+statement error
+SELECT * FROM rs_direct.public.users;
+----
+cannot be browsed as a catalog
+
+statement ok
+CREATE TABLE committed AS SELECT 1 AS i;
+
+statement ok
+COMMIT;
+
+statement ok
+BEGIN;
+
+statement error
+SELECT * FROM rs_direct.public.users;
+----
+cannot be browsed as a catalog
+
+statement ok
+CREATE TABLE rolled_back AS SELECT 1 AS i;
+
+statement ok
+ROLLBACK;
+
+statement ok
+RESET default_transaction_invalidation_policy;
+
+query T
+SELECT table_name FROM duckdb_tables() WHERE table_name IN ('aborted', 'committed', 'rolled_back');
+----
+committed
+
+statement ok
+DETACH rs_direct;
+
+statement ok
+DETACH rs_profile;

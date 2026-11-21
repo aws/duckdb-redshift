@@ -1,0 +1,147 @@
+# name: test/mock/transport.test
+# description: the transport interface, exercised end to end through redshift_query and the mock client
+# group: [mock]
+
+require-env REDSHIFT_TEST_CLIENT mock
+
+# The harness the extension and the client tests start from. It runs entirely against the mock client, so
+# it needs no driver, no credentials and no network.
+#
+# The first argument is an attach handle, 'rs' below. Its sessions, one per DuckDB
+# connection, are tested in session.test.
+#
+# The `rows=`/`cols=`/`norows`/`error=` strings are the mock's directives, not Redshift
+# SQL. They exist only in the mock client. Bind, `params :=` and typed columns are tested in bind.test.
+
+statement error
+SELECT * FROM redshift_query('rs', 'rows=1 cols=1');
+----
+Catalog Error
+
+require redshift
+
+statement ok
+ATTACH '' AS rs (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+# ---------------------------------------------------------------------------
+# Describe: the column count and names come from preparing the statement, before any
+# execution. DuckDB needs them to plan the surrounding query.
+# ---------------------------------------------------------------------------
+query I
+SELECT count(*) FROM (DESCRIBE SELECT * FROM redshift_query('rs', 'rows=2 cols=3'));
+----
+3
+
+query I
+SELECT list(column_name) FROM (DESCRIBE SELECT * FROM redshift_query('rs', 'rows=1 cols=3'));
+----
+[c0, c1, c2]
+
+# ---------------------------------------------------------------------------
+# Execute and stream. The mock hands out two rows per batch, so five rows cross the
+# batch boundary — the path that matters, since the interface requires the client to
+# hand rows over in bounded groups rather than a whole result at once.
+# ---------------------------------------------------------------------------
+query I
+SELECT count(*) FROM redshift_query('rs', 'rows=5 cols=2');
+----
+5
+
+query II
+SELECT c0, c1 FROM redshift_query('rs', 'rows=3 cols=2') ORDER BY c0;
+----
+r0c0	r0c1
+r1c0	r1c1
+r2c0	r2c1
+
+# A zero-row result is a result, not an error or an end-of-stream bug.
+query I
+SELECT count(*) FROM redshift_query('rs', 'rows=0 cols=1');
+----
+0
+
+# An arbitrary statement still exercises the full path; the mock echoes it back.
+query I
+SELECT c0 FROM redshift_query('rs', 'SELECT 1');
+----
+SELECT 1
+
+# A value past DuckDB's 12-byte inline limit lives in the chunk's string heap, so this checks that
+# the scan copies text into the vector rather than pointing at the client's batch.
+query I
+SELECT c0 FROM redshift_query('rs', 'SELECT ''a value well past the inline limit''');
+----
+SELECT 'a value well past the inline limit'
+
+# ---------------------------------------------------------------------------
+# A statement that produces no result set binds a single rowcount rather than
+# pretending to have columns.
+# ---------------------------------------------------------------------------
+query I
+SELECT list(column_name) FROM (DESCRIBE SELECT * FROM redshift_query('rs', 'norows'));
+----
+[rowcount]
+
+query I
+SELECT rowcount FROM redshift_query('rs', 'norows');
+----
+0
+
+# ---------------------------------------------------------------------------
+# A refused statement surfaces as a bind error quoting the remote, because it is the
+# user's SQL that was wrong — and it is refused at prepare, before anything runs.
+# ---------------------------------------------------------------------------
+statement error
+SELECT * FROM redshift_query('rs', 'error=syntax_error_at_or_near_FROM');
+----
+Redshift rejected the statement: syntax_error_at_or_near_FROM
+
+# ---------------------------------------------------------------------------
+# User input is reported as a user error, never as an internal error with a stack
+# trace: DuckDB classifies an internal error as an engine bug.
+# ---------------------------------------------------------------------------
+statement error
+SELECT * FROM redshift_query(NULL, 'rows=1 cols=1');
+----
+the handle argument cannot be NULL
+
+statement error
+SELECT * FROM redshift_query('rs', NULL);
+----
+the SQL argument cannot be NULL
+
+statement error
+SELECT * FROM redshift_query('rs', '');
+----
+the SQL argument is empty
+
+statement error
+SELECT * FROM redshift_query('rs', 'rows=-1');
+----
+rows must be a non-negative integer
+
+# ---------------------------------------------------------------------------
+# Under DuckDB's vector verification every output vector must carry its size: since v2.0 a reset
+# chunk's vectors have size 0 until the scan publishes its rows. More than one 2048-row chunk, and
+# a statement with no rows, both go through that path.
+# ---------------------------------------------------------------------------
+statement ok
+SET debug_verification_mode = 'VERIFY_VECTORS';
+
+query I
+SELECT count(*) FROM redshift_query('rs', 'rows=5000 cols=2');
+----
+5000
+
+query I
+SELECT count(*) FROM (SELECT * FROM redshift_query('rs', 'rows=5000 cols=1') OFFSET 4097);
+----
+903
+
+query I
+SELECT rowcount FROM redshift_query('rs', 'norows');
+----
+0
+
+statement ok
+RESET debug_verification_mode;

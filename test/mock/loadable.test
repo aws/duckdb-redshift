@@ -1,0 +1,17 @@
+# name: test/mock/loadable.test
+# description: under make test_mock_loadable, the redshift extension the tests use is the loadable file, not one linked in
+# group: [mock]
+
+require-env REDSHIFT_TEST_CLIENT mock
+
+# Set only by make test_mock_loadable, whose unit tester does not link the extension. Without this
+# check, a host that linked it after all would run every other file against the linked copy and
+# pass.
+require-env REDSHIFT_TEST_LOADABLE 1
+
+require redshift
+
+query II
+SELECT loaded, install_mode <> 'STATICALLY_LINKED' FROM duckdb_extensions() WHERE extension_name = 'redshift';
+----
+true	true

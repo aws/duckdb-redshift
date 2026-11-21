@@ -1,0 +1,50 @@
+# name: test/client/sql/utf8_names_windows.test
+# description: live, Windows: a non-ASCII column alias, a non-ASCII literal as the server counts its bytes, and a server message quoting a non-ASCII table name show the exact UTF-8 sent
+# group: [sql]
+
+require-env REDSHIFT_TEST_CLIENT odbc
+
+# Live only (test/README.md, "Live variables"): it needs REDSHIFT_TEST_LIVE_REGION and a build with
+# the embedded driver.
+require-env REDSHIFT_TEST_LIVE_REGION
+
+# The account-backed workgroup the live tests reach (test/README.md, "Live variables").
+require-env REDSHIFT_TEST_LIVE_WORKGROUP
+
+require-env REDSHIFT_TEST_LIVE_ACCOUNT_ID
+
+# The Windows driver's narrow entry points; utf8_text_constants.test, read only too, covers the values.
+require windows
+
+require redshift
+
+statement ok
+ATTACH '' AS rs (TYPE redshift, REGION '{REDSHIFT_TEST_LIVE_REGION}', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP '{REDSHIFT_TEST_LIVE_WORKGROUP}', ACCOUNT_ID '{REDSHIFT_TEST_LIVE_ACCOUNT_ID}');
+
+# a, U+00E9, U+20AC and U+1F600 as a column alias, read back through SQLDescribeCol. Lower case, as
+# Redshift folds quoted names.
+query TT
+SELECT column_name, hex(column_name) FROM (DESCRIBE SELECT * FROM redshift_query('rs', 'SELECT t."aé€😀" FROM (SELECT 1 AS "aé€😀") AS t'));
+----
+aé€😀	61C3A9E282ACF09F9880
+
+# The server's own count of the literal's bytes: 10 only if it got the UTF-8 sent. A narrow path
+# that converted the text through the ANSI code page and back would pass the other records, but the
+# server would count 21.
+query I
+SELECT * FROM redshift_query('rs', 'SELECT OCTET_LENGTH(''aé€😀'')');
+----
+10
+
+# A class 42 refusal whose server message quotes the name: the message shown is the UTF-8 sent. Read
+# only: the table does not exist. The runner adds a newline before it full-matches.
+statement error
+SELECT * FROM redshift_query('rs', 'SELECT * FROM "nö_tablé€😀"');
+----
+<REGEX>:(?s)Binder Error: Redshift refused the statement: ERROR:  relation "nö_tablé€😀" does not exist\nSQLSTATE: 42P01\n.*
+
+# The connection is still usable.
+query I
+SELECT * FROM redshift_query('rs', 'SELECT 2');
+----
+2

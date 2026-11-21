@@ -1,0 +1,7 @@
+// The Windows driver set as RCDATA resources, one per file of driver_info.h's list, each named by its
+// symbol stem in upper case, which the loader looks up in its own module. Filled in by
+// third_party/redshift_odbc/tools/lib/driver_info.py, which writes each path in full with forward
+// slashes: the resource compiler reads a backslash in a string as an escape. One language, neutral,
+// so each file is one resource.
+LANGUAGE 0, 0
+@REDSHIFT_DRIVER_RESOURCES@

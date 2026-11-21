@@ -1,0 +1,3 @@
+# The ProductName the MSI's Property table must hold (msi.py check), a space written %20. The
+# version is the lock's. A change is a new product, confirmed with the driver's publisher first.
+Amazon%20Redshift%20ODBC%20Driver%2064-bit

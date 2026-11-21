@@ -1,0 +1,682 @@
+# name: test/mock/fence.test
+# description: the same-handle statement fence refuses two redshift_query scans on one handle in one DuckDB statement, before anything runs
+# group: [mock]
+
+require-env REDSHIFT_TEST_CLIENT mock
+
+require redshift
+
+require json
+
+# Executions are counted from the line the mock logs for each statement it executes, and read back
+# in a later statement.
+statement ok
+CALL enable_logging(level = 'debug');
+
+statement ok
+CREATE MACRO mock_executed() AS (SELECT count(*) FROM duckdb_logs WHERE message LIKE 'redshift mock: executed a statement on %');
+
+statement ok
+ATTACH '' AS rs (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+statement ok
+ATTACH '' AS rs2 (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+# ---------------------------------------------------------------------------
+# Two scans on one handle are refused with the error, whatever puts them in one plan.
+# ---------------------------------------------------------------------------
+statement error
+SELECT * FROM redshift_query('rs', 'rows=1') a, redshift_query('rs', 'rows=1') b;
+----
+Binder Error: redshift_query cannot use attach handle "rs" more than once in the same DuckDB statement. Each attach handle has one Redshift connection. Stage one result in a DuckDB temporary table in a separate statement, or use different attach handles. No Redshift statement was executed.
+
+statement error
+SELECT (SELECT count(*) FROM redshift_query('rs', 'rows=1')) FROM redshift_query('rs', 'rows=1');
+----
+more than once in the same DuckDB statement
+
+statement error
+SELECT * FROM redshift_query('rs', 'rows=1') WHERE c0 IN (SELECT c0 FROM redshift_query('rs', 'rows=1'));
+----
+more than once in the same DuckDB statement
+
+statement error
+SELECT * FROM redshift_query('rs', 'rows=1') WHERE EXISTS (SELECT 1 FROM redshift_query('rs', 'rows=1'));
+----
+more than once in the same DuckDB statement
+
+foreach setop UNION INTERSECT EXCEPT
+
+statement error
+SELECT * FROM redshift_query('rs', 'rows=1') {setop} SELECT * FROM redshift_query('rs', 'rows=1');
+----
+more than once in the same DuckDB statement
+
+endloop
+
+statement error
+SELECT * FROM redshift_query('rs', 'rows=1') UNION ALL SELECT * FROM redshift_query('rs', 'rows=1');
+----
+more than once in the same DuckDB statement
+
+statement error
+SELECT * FROM redshift_query('rs', 'rows=1') a, LATERAL (SELECT * FROM redshift_query('rs', 'rows=1'));
+----
+more than once in the same DuckDB statement
+
+# A view and a table macro used twice.
+statement ok
+CREATE VIEW remote AS SELECT * FROM redshift_query('rs', 'rows=1');
+
+statement error
+SELECT * FROM remote a, remote b;
+----
+more than once in the same DuckDB statement
+
+statement ok
+CREATE MACRO remote_rows() AS TABLE SELECT * FROM redshift_query('rs', 'rows=1');
+
+statement error
+SELECT * FROM remote_rows() a, remote_rows() b;
+----
+more than once in the same DuckDB statement
+
+# Case variants of one name resolve to one handle. The error names the handle as the second scan
+# wrote it.
+statement error
+SELECT * FROM redshift_query('rs', 'rows=1') a, redshift_query('RS', 'rows=1') b;
+----
+redshift_query cannot use attach handle "RS" more than once in the same DuckDB statement
+
+# Two identical calls are two scans on one handle, refused when binding ends, before any optimizer
+# could merge them.
+statement error
+SELECT count(*) FROM redshift_query('rs', 'rows=2') UNION ALL SELECT count(*) FROM redshift_query('rs', 'rows=2');
+----
+more than once in the same DuckDB statement
+
+# Statements that write the result somewhere.
+statement ok
+CREATE TABLE local_rows (c0 VARCHAR);
+
+statement error
+INSERT INTO local_rows SELECT a.c0 FROM redshift_query('rs', 'rows=1') a, redshift_query('rs', 'rows=1') b;
+----
+more than once in the same DuckDB statement
+
+statement error
+CREATE TABLE local_copy AS SELECT a.c0 FROM redshift_query('rs', 'rows=1') a, redshift_query('rs', 'rows=1') b;
+----
+more than once in the same DuckDB statement
+
+statement error
+COPY (SELECT a.c0 FROM redshift_query('rs', 'rows=1') a, redshift_query('rs', 'rows=1') b) TO '{TEST_DIR}/fence.csv';
+----
+more than once in the same DuckDB statement
+
+statement error
+EXPLAIN ANALYZE SELECT * FROM redshift_query('rs', 'rows=1') a, redshift_query('rs', 'rows=1') b;
+----
+more than once in the same DuckDB statement
+
+# PREPARE plans the statement, so the fence refuses it there. A parameter inside a redshift_query
+# argument defers planning to EXECUTE, which the fence refuses instead.
+statement error
+PREPARE twice AS SELECT * FROM redshift_query('rs', 'rows=1') a, redshift_query('rs', 'rows=1') b;
+----
+more than once in the same DuckDB statement
+
+statement ok
+PREPARE deferred AS SELECT * FROM redshift_query('rs', 'rows=1') a, redshift_query('rs', ?) b;
+
+statement error
+EXECUTE deferred('rows=2');
+----
+more than once in the same DuckDB statement
+
+# The fence checks the plan DuckDB binds, before the optimizer, so the optimizer setting does not
+# matter, and a branch the optimizer would prune still counts: the calls written in the SQL decide.
+statement ok
+PRAGMA disable_optimizer;
+
+statement error
+SELECT * FROM redshift_query('rs', 'rows=1') a, redshift_query('rs', 'rows=1') b;
+----
+more than once in the same DuckDB statement
+
+statement ok
+PRAGMA enable_optimizer;
+
+statement error
+SELECT * FROM redshift_query('rs', 'rows=1') UNION ALL SELECT * FROM redshift_query('rs', 'rows=1') WHERE false;
+----
+more than once in the same DuckDB statement
+
+# A scan in a recursive CTE's recursive term would run once per iteration.
+statement error
+WITH RECURSIVE r(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM r, redshift_query('rs', 'rows=1') WHERE n < 3) SELECT * FROM r;
+----
+Binder Error: redshift_query cannot run in the recursive part of a recursive CTE, because DuckDB would run the Redshift statement on attach handle "rs" once per iteration. Stage its result in a DuckDB temporary table in a separate statement, or, if the recursive part reads it through a CTE defined outside the recursive CTE, declare that CTE AS MATERIALIZED. No Redshift statement was executed.
+
+statement error
+WITH RECURSIVE r(n) USING KEY (n) AS (SELECT 1 UNION SELECT n + 1 FROM r, redshift_query('rs', 'rows=1') WHERE n < 3) SELECT * FROM r;
+----
+cannot run in the recursive part of a recursive CTE
+
+# A CTE defined inside the recursive part is inside it too, materialized or not, whether the call is
+# in the CTE or beside it.
+statement error
+WITH RECURSIVE r(n) AS (SELECT 1 UNION ALL SELECT r.n + 1 FROM r, (WITH s AS (SELECT * FROM redshift_query('rs', 'rows=1')) SELECT * FROM s) x WHERE r.n < 3) SELECT * FROM r;
+----
+cannot run in the recursive part of a recursive CTE
+
+statement error
+WITH RECURSIVE r(n) AS (SELECT 1 UNION ALL SELECT r.n + 1 FROM r, (WITH s AS MATERIALIZED (SELECT * FROM redshift_query('rs', 'rows=1')) SELECT * FROM s) x WHERE r.n < 3) SELECT * FROM r;
+----
+cannot run in the recursive part of a recursive CTE
+
+statement error
+WITH RECURSIVE r(n) AS (SELECT 1 UNION ALL SELECT r.n + 1 FROM r, (WITH s AS (SELECT 1) SELECT * FROM s, redshift_query('rs', 'rows=1')) x WHERE r.n < 3) SELECT * FROM r;
+----
+cannot run in the recursive part of a recursive CTE
+
+# Nothing above executed.
+query I
+SELECT mock_executed();
+----
+0
+
+# ---------------------------------------------------------------------------
+# Plans with one scan per handle run.
+# ---------------------------------------------------------------------------
+# Two handles, even attached with the same configuration.
+query II
+SELECT a.c0, b.c0 FROM redshift_query('rs', 'rows=1') a, redshift_query('rs2', 'rows=1') b;
+----
+r0c0	r0c0
+
+# A CTE referenced twice but materialized once, whether asked for or by default.
+query II
+WITH c AS MATERIALIZED (SELECT * FROM redshift_query('rs', 'rows=1')) SELECT a.c0, b.c0 FROM c a, c b;
+----
+r0c0	r0c0
+
+query II
+WITH c AS (SELECT * FROM redshift_query('rs', 'rows=1')) SELECT a.c0, b.c0 FROM c a, c b;
+----
+r0c0	r0c0
+
+# One call that DuckDB's optimizers would copy into a second scan if they could: inlined into each
+# reference of a CTE that is not materialized, or turned into a self-join for a window aggregate over
+# whole partitions. The fence keeps the CTE materialized, and the window aggregate's scan cannot be
+# copied, so each plan keeps its one scan.
+query II
+WITH c AS NOT MATERIALIZED (SELECT * FROM redshift_query('rs', 'rows=1')) SELECT a.c0, b.c0 FROM c a, c b;
+----
+r0c0	r0c0
+
+query II
+SELECT c0, count(*) OVER (PARTITION BY c0) FROM redshift_query('rs', 'rows=2') ORDER BY c0;
+----
+r0c0	1
+r1c0	1
+
+query II
+SELECT c0, max(c0) OVER (PARTITION BY c0) FROM redshift_query('rs', 'rows=2') ORDER BY c0;
+----
+r0c0	r0c0
+r1c0	r1c0
+
+# A default CTE referenced twice under a LIMIT, which CTE inlining would copy, is kept materialized
+# and keeps one scan.
+query II
+WITH c AS (SELECT * FROM redshift_query('rs', 'rows=1')) SELECT a.c0, b.c0 FROM c a, c b LIMIT 1;
+----
+r0c0	r0c0
+
+# Referenced twice, once from a subquery, here a scalar one and one in an outer join's condition,
+# through another CTE that is referenced twice, or once in the body and once from another CTE's
+# definition: still one scan each.
+query II
+WITH c AS NOT MATERIALIZED (SELECT * FROM redshift_query('rs', 'rows=1')) SELECT c0, (SELECT count(*) FROM c) FROM c;
+----
+r0c0	1
+
+query III
+WITH c AS NOT MATERIALIZED (SELECT * FROM redshift_query('rs', 'rows=1')) SELECT * FROM c, (SELECT 'r0c0' AS a) l LEFT JOIN (SELECT 'r0c0' AS b) r ON l.a = r.b AND l.a IN (SELECT c0 FROM c);
+----
+r0c0	r0c0	r0c0
+
+query II
+WITH a AS NOT MATERIALIZED (SELECT * FROM redshift_query('rs', 'rows=1')), b AS NOT MATERIALIZED (SELECT * FROM a) SELECT x.c0, y.c0 FROM b x, b y;
+----
+r0c0	r0c0
+
+query II
+WITH a AS NOT MATERIALIZED (SELECT * FROM redshift_query('rs', 'rows=1')), b AS NOT MATERIALIZED (SELECT * FROM a) SELECT x.c0, y.c0 FROM a x, b y;
+----
+r0c0	r0c0
+
+# Read once, from the outer side of a correlated subquery, which DuckDB's decorrelation can copy.
+query I
+WITH c AS NOT MATERIALIZED (SELECT * FROM redshift_query('rs', 'rows=2')) SELECT c0 FROM c WHERE EXISTS (SELECT 1 FROM range(3) t WHERE t.range::VARCHAR <> c.c0) ORDER BY c0;
+----
+r0c0
+r1c0
+
+# Read once, by an outer join whose condition holds a correlated subquery, which decorrelation can
+# copy too.
+query II
+WITH c AS NOT MATERIALIZED (SELECT * FROM redshift_query('rs', 'rows=2')) SELECT c.c0, t.range FROM c LEFT JOIN range(2) t ON t.range::VARCHAR <> c.c0 AND EXISTS (SELECT 1 FROM range(1) u WHERE u.range::VARCHAR <> c.c0) ORDER BY ALL;
+----
+r0c0	0
+r0c0	1
+r1c0	0
+r1c0	1
+
+# The recursive CTE's anchor runs once.
+query I
+WITH RECURSIVE r(n) AS (SELECT 1 FROM redshift_query('rs', 'rows=1') UNION ALL SELECT n + 1 FROM r WHERE n < 3) SELECT * FROM r;
+----
+1
+2
+3
+
+# EXPLAIN plans without running, so it is not refused.
+statement ok
+EXPLAIN SELECT * FROM redshift_query('rs', 'rows=1') a, redshift_query('rs', 'rows=1') b;
+
+# Its plan is optimized all the same, so a CTE read twice in it is kept materialized too.
+statement ok
+EXPLAIN WITH c AS NOT MATERIALIZED (SELECT * FROM redshift_query('rs', 'rows=1')) SELECT a.c0, b.c0 FROM c a, c b;
+
+# Nor is a CTE reference in a recursive part refused under it.
+statement ok
+EXPLAIN WITH RECURSIVE src AS (SELECT * FROM redshift_query('rs', 'rows=1')), r(i) AS (SELECT 1 UNION ALL SELECT r.i + 1 FROM r, src WHERE r.i < 5) SELECT * FROM r;
+
+# Staging one result in a temporary table, then using the handle again in a later statement.
+statement ok
+CREATE TEMP TABLE staged AS SELECT * FROM redshift_query('rs', 'rows=2');
+
+query II
+SELECT staged.c0, remote.c0 FROM staged, redshift_query('rs', 'rows=1') remote ORDER BY staged.c0;
+----
+r0c0	r0c0
+r1c0	r0c0
+
+# One execution for each statement above that scans the handles, and two for the one with two
+# handles.
+query I
+SELECT mock_executed();
+----
+17
+
+# ---------------------------------------------------------------------------
+# Paths that rebuild or rewrite the plan after the fence has checked it each keep one scan per call,
+# because no redshift_query scan can be copied. Each statement below executes once.
+# ---------------------------------------------------------------------------
+# DuckDB's plan-serializer check round-trips each plan after binding, and would replace it with a
+# copy whose scans the fence never checked; the copy is refused, so the checked plan stays.
+statement ok
+SET debug_verify_serializer = true;
+
+query I
+SELECT * FROM redshift_query('rs', 'rows=1');
+----
+r0c0
+
+query I
+SELECT c0 FROM redshift_query('rs', 'SELECT $1', params := ['a']);
+----
+SELECT $1|$1=a
+
+statement error
+SELECT * FROM redshift_query('rs', 'rows=1') a, redshift_query('rs', 'rows=1') b;
+----
+more than once in the same DuckDB statement
+
+statement ok
+PRAGMA disable_optimizer;
+
+query I
+SELECT * FROM redshift_query('rs', 'rows=1');
+----
+r0c0
+
+statement ok
+PRAGMA enable_optimizer;
+
+statement ok
+RESET debug_verify_serializer;
+
+# Serializing such a plan directly is refused, and runs nothing.
+query I
+SELECT json_extract_string(json_serialize_plan('SELECT * FROM redshift_query(''rs'', ''rows=1'')'), '$.error_message');
+----
+redshift_query scans are not copied: a copy would describe the Redshift statement again and add a second scan on its attach handle
+
+query I
+SELECT mock_executed();
+----
+20
+
+# Grouping sets whose aggregates DuckDB must rewrite, even with the optimizer disabled, share the
+# scan through a CTE.
+statement ok
+PRAGMA disable_optimizer;
+
+query III
+SELECT c0, count(*), mode(c0) IS NOT NULL FROM redshift_query('rs', 'rows=2') GROUP BY ROLLUP (c0) ORDER BY ALL;
+----
+r0c0	1	true
+r1c0	1	true
+NULL	2	true
+
+statement ok
+PRAGMA enable_optimizer;
+
+# A correlated subquery over the scan reads the scan's values through a duplicate-eliminated join.
+query II
+SELECT r.c0, (SELECT count(*) FROM range(3) t WHERE t.range::VARCHAR <> r.c0) FROM redshift_query('rs', 'rows=2') r ORDER BY 1;
+----
+r0c0	3
+r1c0	3
+
+# A PIVOT with an IN list is one statement, and binds its source twice but runs it once.
+query II
+PIVOT redshift_query('rs', 'rows=2') ON c0 IN ('r0c0', 'r1c0') USING count(*);
+----
+1	1
+
+query I
+SELECT mock_executed();
+----
+23
+
+# A PIVOT without an IN list runs one generated CREATE TYPE ... AS ENUM statement per pivoted column
+# before the pivot itself, each reading the pivot's source, so redshift_query is refused in such a
+# statement, before any of them runs, whatever wraps the PIVOT. DuckDB generates one for IN
+# (subquery) too, reading the subquery.
+statement error
+PIVOT redshift_query('rs', 'rows=2') ON c0 USING count(*);
+----
+Binder Error: redshift_query cannot be read by the statements DuckDB runs ahead of a PIVOT to find its values, as it does for a PIVOT without an IN list or with IN (subquery). Without an IN list there is one per pivoted column, each reading the PIVOT's source, so the Redshift statement on attach handle "rs" would run once for each and again for the PIVOT. List the PIVOT's values with IN (...), or stage the result in a DuckDB temporary table in a separate statement. No Redshift statement was executed.
+
+statement error
+PIVOT redshift_query('rs', 'rows=2 cols=2') ON c0, c1 USING count(*);
+----
+cannot be read by the statements DuckDB runs ahead of a PIVOT
+
+foreach wrapper DESCRIBE EXPLAIN
+
+statement error
+{wrapper} PIVOT redshift_query('rs', 'rows=2') ON c0 USING count(*);
+----
+cannot be read by the statements DuckDB runs ahead of a PIVOT
+
+endloop
+
+statement error
+PREPARE dynamic_pivot AS PIVOT redshift_query('rs', 'rows=2') ON c0 USING count(*);
+----
+cannot be read by the statements DuckDB runs ahead of a PIVOT
+
+statement error
+PIVOT redshift_query('rs', 'rows=2') ON c0 IN (SELECT c0 FROM redshift_query('rs2', 'rows=2')) USING count(*);
+----
+cannot be read by the statements DuckDB runs ahead of a PIVOT
+
+# A call in a subquery the source still holds in an expression, here an outer join's condition, and
+# in a CTE the source reads, which DuckDB copies into each generated statement.
+statement error
+PIVOT (SELECT l.a FROM (VALUES ('r0c0')) l(a) LEFT JOIN (VALUES ('r0c0')) r(a) ON l.a = r.a AND l.a IN (SELECT c0 FROM redshift_query('rs', 'rows=1'))) ON a USING count(*);
+----
+cannot be read by the statements DuckDB runs ahead of a PIVOT
+
+statement error
+WITH src AS (SELECT * FROM redshift_query('rs', 'rows=2')) PIVOT src ON c0 USING count(*);
+----
+cannot be read by the statements DuckDB runs ahead of a PIVOT
+
+statement error
+WITH c AS MATERIALIZED (SELECT 1 AS k) PIVOT (SELECT c0 FROM c, redshift_query('rs', 'rows=2')) ON c0 USING count(*);
+----
+cannot be read by the statements DuckDB runs ahead of a PIVOT
+
+query I
+SELECT mock_executed();
+----
+23
+
+# An IN (subquery) that does not call redshift_query runs the source once, and a CREATE TYPE ... AS
+# ENUM the user writes runs its query once.
+query I
+PIVOT redshift_query('rs', 'rows=2') ON c0 IN (SELECT 'r0c0') USING count(*);
+----
+1
+
+statement ok
+CREATE TYPE pivot_values AS ENUM (SELECT c0 FROM redshift_query('rs', 'rows=2'));
+
+query I
+SELECT enum_range(NULL::pivot_values)::VARCHAR;
+----
+[r0c0, r1c0]
+
+# DuckDB names the types it generates __pivot_enum_ and a UUID in lowercase with hyphens, so a
+# user's name with that prefix and anything else is the user's.
+foreach suffix customer 0A2B3C4D-0000-4000-8000-000000000000 0a2b3c4d000040008000000000000000
+
+statement ok
+CREATE TYPE "__pivot_enum_{suffix}" AS ENUM (SELECT c0 FROM redshift_query('rs', 'rows=2'));
+
+endloop
+
+# The exact form DuckDB generates is reserved.
+statement error
+CREATE TYPE "__pivot_enum_0a2b3c4d-0000-4000-8000-000000000000" AS ENUM (SELECT c0 FROM redshift_query('rs', 'rows=2'));
+----
+cannot be read by the statements DuckDB runs ahead of a PIVOT
+
+# UNPIVOT names its columns, so it is one statement.
+query II
+UNPIVOT redshift_query('rs', 'rows=1 cols=2') ON c0, c1 INTO NAME n VALUE v ORDER BY n;
+----
+c0	r0c0
+c1	r0c1
+
+query I
+SELECT mock_executed();
+----
+29
+
+# Parameters still bind when DuckDB's plan check serializes for an older storage version, which
+# refuses a required keyword-only parameter there; params is an optional one.
+statement ok
+SET debug_verify_serializer = true;
+
+statement ok
+SET storage_compatibility_version = 'v1.0.0';
+
+query I
+SELECT c0 FROM redshift_query('rs', 'SELECT $1', params := ['a']);
+----
+SELECT $1|$1=a
+
+statement ok
+RESET storage_compatibility_version;
+
+statement ok
+RESET debug_verify_serializer;
+
+query I
+SELECT mock_executed();
+----
+30
+
+# ---------------------------------------------------------------------------
+# A scan the user wrote in a CTE outside a recursive CTE, which the recursive part reads: CTE
+# inlining would move the CTE into the recursive part, where the call would run once per
+# iteration, so it is refused, through a chain of CTEs too, whatever the optimizer settings. A CTE
+# declared AS MATERIALIZED is never inlined, and a CTE the anchor reads runs once: those run.
+# ---------------------------------------------------------------------------
+statement error
+WITH RECURSIVE src AS (SELECT * FROM redshift_query('rs', 'rows=1')), r(i) AS (SELECT 1 UNION ALL SELECT r.i + 1 FROM r, src WHERE r.i < 5) SELECT * FROM r;
+----
+Binder Error: redshift_query cannot run in the recursive part of a recursive CTE, because DuckDB would run the Redshift statement on attach handle "rs" once per iteration. Stage its result in a DuckDB temporary table in a separate statement, or, if the recursive part reads it through a CTE defined outside the recursive CTE, declare that CTE AS MATERIALIZED. No Redshift statement was executed.
+
+statement error
+WITH RECURSIVE src AS (SELECT * FROM redshift_query('rs', 'rows=1')), r(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM r WHERE i < (SELECT count(*) + 4 FROM src)) SELECT * FROM r;
+----
+cannot run in the recursive part of a recursive CTE
+
+statement error
+WITH RECURSIVE src AS (SELECT * FROM redshift_query('rs', 'rows=1')), mid AS (SELECT * FROM src), r(i) AS (SELECT 1 UNION ALL SELECT r.i + 1 FROM r, mid WHERE r.i < 5) SELECT * FROM r;
+----
+cannot run in the recursive part of a recursive CTE
+
+# Through a chain, the refusal names the handle the chain reaches, not the last one scanned.
+statement error
+WITH RECURSIVE a AS (SELECT * FROM redshift_query('rs2', 'rows=1')), b AS (SELECT * FROM redshift_query('rs', 'rows=1')), mid AS (SELECT * FROM a), r(i) AS (SELECT 1 UNION ALL SELECT r.i + 1 FROM r, mid WHERE r.i < 5) SELECT count(*) FROM r, b;
+----
+attach handle "rs2" once per iteration
+
+# Read outside the recursive part as well, the CTE would stay materialized, but the fence does not
+# predict the optimizer's choice.
+statement error
+WITH RECURSIVE src AS (SELECT * FROM redshift_query('rs', 'rows=1')), r(i) AS (SELECT 1 UNION ALL SELECT r.i + 1 FROM r, src WHERE r.i < 5) SELECT count(*) FROM r, src;
+----
+cannot run in the recursive part of a recursive CTE
+
+foreach setting disable_optimizer enable_optimizer
+
+statement ok
+PRAGMA {setting};
+
+statement ok
+SET disabled_optimizers = 'extension';
+
+statement error
+WITH RECURSIVE src AS (SELECT * FROM redshift_query('rs', 'rows=1')), r(i) AS (SELECT 1 UNION ALL SELECT r.i + 1 FROM r, src WHERE r.i < 5) SELECT * FROM r;
+----
+cannot run in the recursive part of a recursive CTE
+
+# A CTE declared NOT MATERIALIZED is inlinable too.
+statement error
+WITH RECURSIVE src AS NOT MATERIALIZED (SELECT * FROM redshift_query('rs', 'rows=1')), r(i) AS (SELECT 1 UNION ALL SELECT r.i + 1 FROM r, src WHERE r.i < 5) SELECT * FROM r;
+----
+cannot run in the recursive part of a recursive CTE
+
+statement ok
+RESET disabled_optimizers;
+
+endloop
+
+query I
+SELECT mock_executed();
+----
+30
+
+query I
+WITH RECURSIVE src AS MATERIALIZED (SELECT * FROM redshift_query('rs', 'rows=1')), r(i) AS (SELECT 1 UNION ALL SELECT r.i + 1 FROM r, src WHERE r.i < 5) SELECT count(*) FROM r;
+----
+5
+
+query I
+WITH RECURSIVE src AS MATERIALIZED (SELECT * FROM redshift_query('rs', 'rows=1')), mid AS (SELECT * FROM src), r(i) AS (SELECT 1 UNION ALL SELECT r.i + 1 FROM r, mid WHERE r.i < 5) SELECT count(*) FROM r;
+----
+5
+
+query I
+WITH RECURSIVE src AS (SELECT * FROM redshift_query('rs', 'rows=1')), r(i) AS (SELECT count(*) FROM src UNION ALL SELECT r.i + 1 FROM r WHERE r.i < 5) SELECT count(*) FROM r;
+----
+5
+
+# A recursive part reading a CTE that holds no call runs, with and without a call in the anchor.
+query I
+WITH RECURSIVE src AS (SELECT 1 AS x), r(i) AS (SELECT 1 UNION ALL SELECT r.i + 1 FROM r, src WHERE r.i < 3) SELECT count(*) FROM r;
+----
+3
+
+query I
+WITH RECURSIVE src AS (SELECT 1 AS x), r(i) AS (SELECT count(*) FROM redshift_query('rs', 'rows=1') UNION ALL SELECT r.i + 1 FROM r, src WHERE r.i < 3) SELECT count(*) FROM r;
+----
+3
+
+query I
+SELECT mock_executed();
+----
+34
+
+# ---------------------------------------------------------------------------
+# A subquery that DuckDB still holds in an expression when binding ends, such as one in an outer
+# join's condition, is checked like any other part of the statement, with or without the optimizer.
+# ---------------------------------------------------------------------------
+statement ok
+CREATE TABLE outer_left AS SELECT 'r0c0' AS a;
+
+statement ok
+CREATE TABLE outer_right AS SELECT 'r0c0' AS a;
+
+foreach optimizer enable_optimizer disable_optimizer
+
+statement ok
+PRAGMA {optimizer};
+
+query II
+SELECT * FROM outer_left l LEFT JOIN outer_right r ON l.a = r.a AND l.a IN (SELECT c0 FROM redshift_query('rs', 'rows=1'));
+----
+r0c0	r0c0
+
+statement error
+SELECT * FROM redshift_query('rs', 'rows=1') x, outer_left l LEFT JOIN outer_right r ON l.a = r.a AND l.a IN (SELECT c0 FROM redshift_query('rs', 'rows=1'));
+----
+more than once in the same DuckDB statement
+
+# Inside a recursive part, such a subquery would run once per iteration.
+statement error
+WITH RECURSIVE r(n) AS (SELECT 1 UNION ALL SELECT r.n + 1 FROM r, (SELECT l.a FROM outer_left l LEFT JOIN outer_right o ON l.a = o.a AND l.a IN (SELECT c0 FROM redshift_query('rs', 'rows=1'))) x WHERE r.n < 3) SELECT * FROM r;
+----
+cannot run in the recursive part of a recursive CTE
+
+endloop
+
+statement ok
+PRAGMA enable_optimizer;
+
+query I
+SELECT mock_executed();
+----
+36
+
+# ---------------------------------------------------------------------------
+# With the optimizer enabled, DuckDB binds a PREPARE that reads a table again at every EXECUTE,
+# keeping no plan for it, and the fence checks each new plan: here the view the statement reads was
+# replaced, and now calls the handle a second time.
+# ---------------------------------------------------------------------------
+statement ok
+CREATE TABLE rebind_rows AS SELECT 1 AS i;
+
+statement ok
+CREATE VIEW rebind_view AS SELECT 'x' AS c0;
+
+statement ok
+PREPARE rebound AS SELECT a.c0, v.c0 FROM redshift_query('rs', 'rows=1') a, rebind_view v, rebind_rows;
+
+query II
+EXECUTE rebound;
+----
+r0c0	x
+
+statement ok
+CREATE OR REPLACE VIEW rebind_view AS SELECT c0 FROM redshift_query('rs', 'rows=1');
+
+statement error
+EXECUTE rebound;
+----
+more than once in the same DuckDB statement
+
+query I
+SELECT mock_executed();
+----
+37

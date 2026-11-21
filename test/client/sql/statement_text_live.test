@@ -1,0 +1,40 @@
+# name: test/client/sql/statement_text_live.test
+# description: live: a statement naming an unknown database or schema shows the server's first line, under 3D000 and 3F000
+# group: [sql]
+
+require-env REDSHIFT_TEST_CLIENT odbc
+
+# Live only (test/README.md, "Live variables"): it needs REDSHIFT_TEST_LIVE_REGION and a build with
+# the embedded driver.
+require-env REDSHIFT_TEST_LIVE_REGION
+
+# The account-backed workgroup the live tests reach (test/README.md, "Live variables").
+require-env REDSHIFT_TEST_LIVE_WORKGROUP
+
+require-env REDSHIFT_TEST_LIVE_ACCOUNT_ID
+
+require redshift
+
+statement ok
+ATTACH '' AS rs (TYPE redshift, REGION '{REDSHIFT_TEST_LIVE_REGION}', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP '{REDSHIFT_TEST_LIVE_WORKGROUP}', ACCOUNT_ID '{REDSHIFT_TEST_LIVE_ACCOUNT_ID}');
+
+# Classes 3D and 3F are among the listed classes whose first line the client shows. A
+# database@catalog the workgroup has not mounted is refused at prepare under 3D000, with the
+# server's line naming it; the SQLSTATE line comes right after that first line, so nothing else of
+# the server's text shows. The runner adds a newline before it full-matches.
+statement error
+SELECT * FROM redshift_query('rs', 'SELECT 1 FROM "nope@nope".a.b');
+----
+<REGEX>:(?s)Binder Error: Redshift refused the statement: ERROR:  "nope@nope" does not exist\nSQLSTATE: 3D000\n.*
+
+# A schema that does not exist, under 3F000, in the same form.
+statement error
+SELECT * FROM redshift_query('rs', 'SELECT 1 FROM duckdb_redshift_test_no_such_schema.t');
+----
+<REGEX>:(?s)Binder Error: Redshift refused the statement: ERROR:  schema "duckdb_redshift_test_no_such_schema" does not exist\nSQLSTATE: 3F000\n.*
+
+# Neither refusal ends the session: the same handle still runs a statement.
+query I
+SELECT * FROM redshift_query('rs', 'SELECT 1');
+----
+1

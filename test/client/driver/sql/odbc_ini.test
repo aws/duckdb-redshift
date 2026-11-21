@@ -1,0 +1,35 @@
+# name: test/client/driver/sql/odbc_ini.test
+# description: an odbc.ini in the current directory that would turn the driver's logging on is not read (run-e2e.sh)
+# group: [sql]
+
+require-env REDSHIFT_TEST_CLIENT odbc
+
+require-env DUCKDB_REDSHIFT_TEST_E2E odbc-ini
+
+# Only with run-e2e.sh's fake keys and no session token, so a unit tester started by hand on a host with a
+# network cannot connect with the caller's own credentials (CREDENTIAL_PROVIDER aws_default_chain, with no PROFILE,
+# takes the keys from the environment first).
+require-env AWS_ACCESS_KEY_ID test-not-a-key
+
+require-env AWS_SECRET_ACCESS_KEY test-not-a-secret
+
+require-env-not AWS_SESSION_TOKEN
+
+require redshift
+
+# run-e2e.sh runs this file in a directory with an odbc.ini that sets [ODBC] LogLevel=6 and a LogPath in a
+# directory of its own, which it checks stays empty. The driver reads $ODBCINI, or else ./odbc.ini, when it
+# allocates an environment handle while it holds none, as at the first connect here; the extension allocates it
+# with ODBCINI=/dev/null, so the file is not read: the connect goes on to fail with no
+# network.
+statement error
+ATTACH '' AS rs (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'analytics', ACCOUNT_ID '012345678901')
+----
+<REGEX>:.*IO Error: Cannot attach rs: Could not connect to Redshift at 127\.0\.0\.1 \(region us-east-1, workgroup [^)]+\): the connection attempt failed\..*
+
+# ODBCINI is unset again after that allocation, so the next connect is not refused for it, and fails the same
+# way with the file still in the directory.
+statement error
+ATTACH '' AS rs (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'analytics', ACCOUNT_ID '012345678901')
+----
+<REGEX>:.*IO Error: Cannot attach rs: Could not connect to Redshift at 127\.0\.0\.1 \(region us-east-1, workgroup [^)]+\): the connection attempt failed\..*

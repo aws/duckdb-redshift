@@ -1,0 +1,224 @@
+# name: test/mock/detach.test
+# description: DETACH retires a handle's Redshift sessions on every DuckDB connection at once, and nothing after it finds the old handle
+# group: [mock]
+
+require-env REDSHIFT_TEST_CLIENT mock
+
+require redshift
+
+# Opens, closes and Describes are counted from the lines the mock logs, through DuckDB's logger.
+statement ok
+CALL enable_logging(level = 'debug');
+
+statement ok
+CREATE MACRO mock_opened() AS (SELECT count(*) FROM duckdb_logs WHERE message LIKE 'redshift mock: opened a connection to %');
+
+statement ok
+CREATE MACRO mock_closed() AS (SELECT count(*) FROM duckdb_logs WHERE message LIKE 'redshift mock: closed a connection to %');
+
+statement ok
+CREATE MACRO mock_described() AS (SELECT count(*) FROM duckdb_logs WHERE message LIKE 'redshift mock: described a statement on %');
+
+# ---------------------------------------------------------------------------
+# Two DuckDB connections, one after the other. Each has an idle session on the handle, and each
+# has run a statement on it, so the mock answers that its session may hold state, as the
+# client does. DETACH closes both at once.
+# ---------------------------------------------------------------------------
+statement ok
+ATTACH '' AS rs (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+statement ok
+SELECT * FROM redshift_query('rs', 'rows=1 cols=1');
+
+statement ok con1
+SELECT * FROM redshift_query('rs', 'rows=1 cols=1');
+
+query III
+SELECT mock_opened(), mock_closed(), mock_described();
+----
+2	0	2
+
+statement ok
+DETACH rs;
+
+query II
+SELECT mock_opened(), mock_closed();
+----
+2	2
+
+# The detaching DuckDB connection ended its session itself, so its next statement gets the plain
+# unresolved-handle error, and nothing about the state the session held.
+statement error
+SELECT * FROM redshift_query('rs', 'rows=1 cols=1');
+----
+<REGEX>:Binder Error: redshift_query: no attached database is named "rs"\. Attach a Redshift handle first with ATTACH '' AS rs \(TYPE redshift, \.\.\.\)(\n\nLINE 1:.*)?
+
+# The bystander's next statement does not resolve the name either, and opens nothing. Its session
+# ran a statement, so the error says its state may be lost (reattach.test).
+statement error con1
+SELECT * FROM redshift_query('rs', 'rows=1 cols=1');
+----
+Binder Error: redshift_query: no attached database is named "rs"
+
+query III
+SELECT mock_opened(), mock_closed(), mock_described();
+----
+2	2	2
+
+# ---------------------------------------------------------------------------
+# A bystander inside a DuckDB transaction does not hold the handle: ResolveHandle never adds it to
+# the transaction, and by default the gate refuses redshift_query there too. So
+# DETACH closes the bystander's idle session at once.
+# ---------------------------------------------------------------------------
+statement ok
+ATTACH '' AS rs (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+statement ok con1
+SELECT * FROM redshift_query('rs', 'rows=1 cols=1');
+
+statement ok con1
+BEGIN;
+
+statement error con1
+SELECT * FROM redshift_query('rs', 'rows=1 cols=1');
+----
+Binder Error: redshift_query cannot run while a DuckDB transaction is open
+
+query II
+SELECT mock_opened(), mock_closed();
+----
+4	2
+
+statement ok
+DETACH rs;
+
+query II
+SELECT mock_opened(), mock_closed();
+----
+4	4
+
+statement ok con1
+ROLLBACK;
+
+# Its next statement finds the name gone, and is told that its session may have held state.
+statement error con1
+SELECT * FROM redshift_query('rs', 'rows=1 cols=1');
+----
+<REGEX>:Binder Error: redshift_query: no attached database is named "rs"\. Attach a Redshift handle first with ATTACH '' AS rs \(TYPE redshift, \.\.\.\)\. Another DuckDB connection detached or replaced the Redshift handle that had this name, or an ATTACH under this name was rolled back, while this DuckDB connection had a Redshift session on it, and that session may have held state, which is now lost\.(\n\nLINE 1:.*)?
+
+query III
+SELECT mock_opened(), mock_closed(), mock_described();
+----
+4	4	3
+
+# ---------------------------------------------------------------------------
+# A transaction that looked the name up as a catalog does hold the old handle, until it ends:
+# DuckDB keeps the catalog alive for it. The handle's idle sessions close at DETACH all the same, and
+# each closes once, not again when the catalog is destroyed.
+# ---------------------------------------------------------------------------
+statement ok
+ATTACH '' AS rs (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+statement ok
+SELECT * FROM redshift_query('rs', 'rows=1 cols=1');
+
+statement ok con1
+SELECT * FROM redshift_query('rs', 'rows=1 cols=1');
+
+statement ok con1
+BEGIN;
+
+statement error con1
+SELECT * FROM rs.some_table;
+----
+cannot be browsed as a catalog
+
+statement ok
+DETACH rs;
+
+query II
+SELECT mock_opened(), mock_closed();
+----
+6	6
+
+statement ok con1
+ROLLBACK;
+
+query II
+SELECT mock_opened(), mock_closed();
+----
+6	6
+
+# ---------------------------------------------------------------------------
+# The name is looked up without adding it to the query's transaction. Only the error message reads
+# what else has the name: `temp`, outside the list, and a DuckDB database a transaction still holds
+# after another DuckDB connection detached it. Inside an explicit transaction the gate refuses first
+# by default; test_transaction.cpp reaches the second through a transaction whose client turned
+# autocommit back on without ending it.
+# ---------------------------------------------------------------------------
+statement error
+SELECT * FROM redshift_query('temp', 'rows=1 cols=1');
+----
+Binder Error: redshift_query: "temp" is a duckdb database, not a Redshift handle
+
+# An unqualified call is looked up in `temp.main` first, which starts a transaction on `temp`, so
+# the transaction finds it. Qualified as `system.main`, it is not, and only the lookup of `temp`
+# itself finds it.
+statement error
+SELECT * FROM system.main.redshift_query('temp', 'rows=1 cols=1');
+----
+Binder Error: redshift_query: "temp" is a duckdb database, not a Redshift handle
+
+statement ok
+ATTACH ':memory:' AS local_held;
+
+statement ok
+CREATE TABLE local_held.t AS SELECT 1 AS x;
+
+statement ok con2
+BEGIN;
+
+query I con2
+SELECT x FROM local_held.t;
+----
+1
+
+statement ok
+DETACH local_held;
+
+statement error con2
+SELECT * FROM redshift_query('local_held', 'rows=1 cols=1');
+----
+Binder Error: redshift_query cannot run while a DuckDB transaction is open
+
+statement ok con2
+ROLLBACK;
+
+statement error con2
+SELECT * FROM redshift_query('local_held', 'rows=1 cols=1');
+----
+Binder Error: redshift_query: no attached database is named "local_held"
+
+# ---------------------------------------------------------------------------
+# A handle attached again under the name never reaches the old sessions: each DuckDB connection's
+# first use of it opens a new one. con1's earlier session may have held state, so con1 is told once
+# first, before anything opens (reattach.test has every case).
+# ---------------------------------------------------------------------------
+statement ok
+ATTACH '' AS rs (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+statement ok
+SELECT * FROM redshift_query('rs', 'rows=1 cols=1');
+
+statement error con1
+SELECT * FROM redshift_query('rs', 'rows=1 cols=1');
+----
+a new handle is attached under the name now
+
+statement ok con1
+SELECT * FROM redshift_query('rs', 'rows=1 cols=1');
+
+query II
+SELECT mock_opened(), mock_closed();
+----
+8	6

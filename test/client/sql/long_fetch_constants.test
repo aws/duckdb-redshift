@@ -1,0 +1,60 @@
+# name: test/client/sql/long_fetch_constants.test
+# description: live: a constant result with a long column reads it with SQLGetData after the bound columns, byte-exact
+# group: [sql]
+
+require-env REDSHIFT_TEST_CLIENT odbc
+
+# Live only (test/README.md, "Live variables"): it needs REDSHIFT_TEST_LIVE_REGION and a build with
+# the embedded driver.
+require-env REDSHIFT_TEST_LIVE_REGION
+
+# The account-backed workgroup the live tests reach (test/README.md, "Live variables").
+require-env REDSHIFT_TEST_LIVE_WORKGROUP
+
+require-env REDSHIFT_TEST_LIVE_ACCOUNT_ID
+
+require redshift
+
+statement ok
+ATTACH '' AS rs (TYPE redshift, REGION '{REDSHIFT_TEST_LIVE_REGION}', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP '{REDSHIFT_TEST_LIVE_WORKGROUP}', ACCOUNT_ID '{REDSHIFT_TEST_LIVE_ACCOUNT_ID}');
+
+# The INTEGER is bound and the VARBYTE after it read with SQLGetData as SQL_C_BINARY, so the bytes
+# arrive as the server holds them rather than as the driver's hex text. Constants cast to VARBYTE's
+# default 64000 bytes, so a principal that may not write runs this file; long_fetch.test reads them
+# stored.
+query ITI
+SELECT k, hex(b), octet_length(b) FROM redshift_query('rs', 'SELECT 1 AS k, CAST(FROM_HEX(''00ff10'') AS VARBYTE(64000)) AS b UNION ALL SELECT 2, CAST(FROM_HEX('''') AS VARBYTE(64000)) ORDER BY k');
+----
+1	00FF10	3
+2	(empty)	0
+
+# 5000 bytes take two reads, as a binary part holds 4096 bytes. The 3-byte pattern does not divide
+# 4096, so a part lost, repeated or out of order changes the value.
+query III
+SELECT k, octet_length(b), b = unhex(repeat('00FF10', 1666) || '00FF')
+FROM redshift_query('rs', 'SELECT 3 AS k, CAST(FROM_HEX(REPEAT(''00ff10'', 1666) || ''00ff'') AS VARBYTE(64000)) AS b');
+----
+3	5000	true
+
+# The driver reports the unqualified interval as CHARACTER VARYING of size 0, which is read whole.
+query T
+SELECT * FROM redshift_query('rs', 'SELECT INTERVAL ''1 day'' AS i');
+----
+1 day
+
+# Under 2048 of these rows fill a set's share, so the share ends each set, the ring comes round
+# and the driver's 2048-row batches end mid-set. Every seventh v is NULL, each other one's length
+# and letter follow its k, so a value in the wrong row or at the wrong offset shows, and j is read
+# whole after the long column.
+query IIIIIII
+SELECT count(*), count(v), sum(k), sum(j), sum(length(v)), count(*) FILTER (WHERE length(v) = 2000 + k % 1000), count(*) FILTER (WHERE v = repeat(chr(97 + k % 26), 2000 + k % 1000)) FROM redshift_query('rs', 'SELECT g AS k, CAST(CASE WHEN g % 7 = 0 THEN NULL ELSE REPEAT(CHR(97 + g % 26), 2000 + g % 1000) END AS VARCHAR(3000)) AS v, g * 2 AS j FROM generate_series(1, 10000) AS g');
+----
+10000	8572	50005000	100010000	21425858	8572	8572
+
+# Two bound VARCHAR(1024) cells of 1000 bytes before the long column reserve each set's arena at
+# about its share, so every value takes a string; values of 2000 to 5999 bytes, one part below
+# 4096 and two above, share each set, and every seventh is NULL.
+query IIIII
+SELECT count(*), count(v), sum(length(v)), count(*) FILTER (WHERE v = repeat(chr(97 + k % 26), 2000 + k % 4000)), count(*) FILTER (WHERE a = repeat('a', 1000) AND b = repeat('b', 1000)) FROM redshift_query('rs', 'SELECT g AS k, CAST(REPEAT(''a'', 1000) AS VARCHAR(1024)) AS a, CAST(REPEAT(''b'', 1000) AS VARCHAR(1024)) AS b, CAST(CASE WHEN g % 7 = 0 THEN NULL ELSE REPEAT(CHR(97 + g % 26), 2000 + g % 4000) END AS VARCHAR(65535)) AS v FROM generate_series(1, 10000) AS g');
+----
+10000	8572	32570858	8572	10000

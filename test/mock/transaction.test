@@ -1,0 +1,376 @@
+# name: test/mock/transaction.test
+# description: by default, redshift_query is refused inside an explicit DuckDB transaction, at bind and at execution, and a Redshift transaction continues once the DuckDB one ends (transaction_option.test covers the option that allows it)
+# group: [mock]
+
+require-env REDSHIFT_TEST_CLIENT mock
+
+require redshift
+
+statement ok
+CALL enable_logging(level = 'debug');
+
+statement ok
+CREATE MACRO mock_opened() AS (SELECT count(*) FROM duckdb_logs WHERE message LIKE 'redshift mock: opened a connection to %');
+
+statement ok
+CREATE MACRO mock_described() AS (SELECT count(*) FROM duckdb_logs WHERE message LIKE 'redshift mock: described a statement on %');
+
+statement ok
+CREATE MACRO mock_executed() AS (SELECT count(*) FROM duckdb_logs WHERE message LIKE 'redshift mock: executed a statement on %');
+
+statement ok
+ATTACH '' AS rs (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+statement ok
+CREATE TABLE local (i INTEGER);
+
+# A Redshift transaction the user opens through redshift_query, on the pair's one session. The mock
+# echoes the statement, which the extension sends as written.
+query I
+SELECT c0 FROM redshift_query('rs', 'BEGIN');
+----
+BEGIN
+
+query III
+SELECT mock_opened(), mock_described(), mock_executed();
+----
+1	1	1
+
+# ---------------------------------------------------------------------------
+# Inside a DuckDB transaction, redshift_query is refused at bind, before any transport call, with
+# the message as a binder error. Under DuckDB v2.0.1's default invalidation policy,
+# ALL_ERRORS_INVALIDATE_TRANSACTION, every error aborts the DuckDB transaction, the gate's binder
+# error as much as a missing table's, and no exception type escapes that
+# (ClientContext::ErrorInvalidatesTransaction). So the message says the transaction is aborted, that
+# COMMIT would roll it back, and how to keep a transaction usable.
+# ---------------------------------------------------------------------------
+statement ok
+BEGIN;
+
+statement ok
+INSERT INTO local VALUES (1);
+
+statement error
+SELECT * FROM redshift_query('rs', 'rows=1');
+----
+Binder Error: redshift_query cannot run while a DuckDB transaction is open because DuckDB COMMIT or ROLLBACK does not control Redshift operations. This error has aborted the DuckDB transaction: under the transaction's invalidation policy, every error does. Run ROLLBACK (COMMIT would also roll it back, without an error), then run redshift_query outside a DuckDB transaction, and enable autocommit if your client disabled it. To keep a DuckDB transaction usable after this refusal, run SET current_transaction_invalidation_policy = 'SYNTACTIC_ERRORS_DO_NOT_INVALIDATE' in it before calling redshift_query; for a transaction BEGIN opens, setting default_transaction_invalidation_policy to that value before BEGIN does the same. If a Redshift transaction is already open on this handle, continue working on it through redshift_query after the DuckDB transaction ends.
+
+statement error
+SELECT 1;
+----
+Current transaction is aborted
+
+statement ok
+COMMIT;
+
+query I
+SELECT count(*) FROM local;
+----
+0
+
+# DuckDB binds a statement before it refuses one in a transaction an earlier error aborted
+# (ClientContext::CheckIfPreparedStatementIsExecutable), so the gate checks for that too, and says
+# the transaction was already aborted, with no policy advice: no setting made now would have kept it
+# usable.
+statement ok
+BEGIN;
+
+statement ok
+INSERT INTO local VALUES (1);
+
+statement error
+SELECT 'not a number'::INTEGER;
+----
+Conversion Error
+
+statement error
+SELECT * FROM redshift_query('rs', 'rows=1');
+----
+Binder Error: redshift_query cannot run while a DuckDB transaction is open because DuckDB COMMIT or ROLLBACK does not control Redshift operations. The DuckDB transaction was already aborted by an earlier error. Run ROLLBACK (COMMIT would also roll it back, without an error), then run redshift_query outside a DuckDB transaction, and enable autocommit if your client disabled it. If a Redshift transaction is already open on this handle, continue working on it through redshift_query after the DuckDB transaction ends.
+
+statement ok
+COMMIT;
+
+query I
+SELECT count(*) FROM local;
+----
+0
+
+# Prepared outside a transaction, so that only execution's gate can refuse them below.
+statement ok
+PREPARE later AS SELECT count(*) FROM redshift_query('rs', 'rows=1');
+
+statement ok
+PREPARE partial AS INSERT INTO local SELECT 1 UNION ALL SELECT c0::INT FROM redshift_query('rs', 'rows=1 types=int8');
+
+# ---------------------------------------------------------------------------
+# At execution the refusal is an executor error, which aborts the DuckDB transaction under every
+# policy: other parts of the statement may have written before the scan started, and DuckDB has no
+# statement-level rollback, so the transaction must not stay usable for a COMMIT to keep them.
+# ---------------------------------------------------------------------------
+statement ok
+BEGIN;
+
+statement ok
+INSERT INTO local VALUES (1);
+
+statement error
+EXECUTE later;
+----
+Executor Error: redshift_query cannot run while a DuckDB transaction is open because DuckDB COMMIT or ROLLBACK does not control Redshift operations. It was refused as the statement started to run, after other parts of the statement may have written, so this error has aborted the DuckDB transaction. Run ROLLBACK (COMMIT would also roll it back, without an error), then run redshift_query outside a DuckDB transaction, and enable autocommit if your client disabled it. If a Redshift transaction is already open on this handle, continue working on it through redshift_query after the DuckDB transaction ends.
+
+statement error
+SELECT 1;
+----
+Current transaction is aborted
+
+statement ok
+COMMIT;
+
+query I
+SELECT count(*) FROM local;
+----
+0
+
+# With SYNTACTIC_ERRORS_DO_NOT_INVALIDATE too: the union's first branch has inserted its row when the
+# scan is refused, and COMMIT keeps nothing.
+statement ok
+SET default_transaction_invalidation_policy = 'SYNTACTIC_ERRORS_DO_NOT_INVALIDATE';
+
+statement ok
+BEGIN;
+
+statement error
+EXECUTE partial;
+----
+Executor Error: redshift_query cannot run while a DuckDB transaction is open because DuckDB COMMIT or ROLLBACK does not control Redshift operations. It was refused as the statement started to run
+
+statement error
+SELECT 1;
+----
+Current transaction is aborted
+
+statement ok
+COMMIT;
+
+query I
+SELECT count(*) FROM local;
+----
+0
+
+# ---------------------------------------------------------------------------
+# Two bind-time cases in which the transaction is aborted even under
+# SYNTACTIC_ERRORS_DO_NOT_INVALIDATE, which the SET above made the default. The general bind-time
+# rule under that policy follows in the next section.
+# ---------------------------------------------------------------------------
+# Even under this policy, DuckDB aborts the transaction when it expanded the statement into several
+# and an earlier one wrote (ClientContext::ErrorInvalidatesQueryTransaction): a PIVOT without an IN
+# list runs a generated CREATE TYPE first. The gate cannot see that, so its message says "unless",
+# and to run SELECT 1 to find out: a COMMIT after such an abort rolls back without an error.
+statement ok
+INSERT INTO local VALUES (5);
+
+statement ok
+BEGIN;
+
+statement ok
+INSERT INTO local VALUES (6);
+
+statement error
+SELECT * FROM (PIVOT local ON i USING count(*)) p, redshift_query('rs', 'rows=1');
+----
+Binder Error: redshift_query cannot run while a DuckDB transaction is open because DuckDB COMMIT or ROLLBACK does not control Redshift operations. Unless DuckDB had already run part of this statement as a separate statement that wrote, as a PIVOT without an IN list does
+
+statement error
+SELECT 1;
+----
+Current transaction is aborted
+
+statement ok
+COMMIT;
+
+query I
+SELECT count(*) FROM local WHERE i = 6;
+----
+0
+
+statement ok
+DELETE FROM local;
+
+# A transaction an earlier error already aborted gets the "already aborted" message under this
+# policy too, as under the default one above, and is not called usable.
+statement ok
+BEGIN;
+
+statement ok
+INSERT INTO local VALUES (1);
+
+statement error
+SELECT 'not a number'::INTEGER;
+----
+Conversion Error
+
+statement error
+SELECT * FROM redshift_query('rs', 'rows=1');
+----
+Binder Error: redshift_query cannot run while a DuckDB transaction is open because DuckDB COMMIT or ROLLBACK does not control Redshift operations. The DuckDB transaction was already aborted by an earlier error. Run ROLLBACK (COMMIT would also roll it back, without an error), then run redshift_query outside a DuckDB transaction, and enable autocommit if your client disabled it. If a Redshift transaction is already open on this handle, continue working on it through redshift_query after the DuckDB transaction ends.
+
+statement ok
+COMMIT;
+
+query I
+SELECT count(*) FROM local;
+----
+0
+
+# ---------------------------------------------------------------------------
+# With SYNTACTIC_ERRORS_DO_NOT_INVALIDATE set as the default before BEGIN, a binder error does not
+# abort the transaction, and the message says so: after each refusal at bind, in every statement
+# form, the next statement runs in it, and COMMIT keeps the work done around them.
+# ---------------------------------------------------------------------------
+statement ok
+BEGIN;
+
+statement ok
+INSERT INTO local VALUES (1);
+
+statement error
+SELECT * FROM redshift_query('rs', 'rows=1');
+----
+Binder Error: redshift_query cannot run while a DuckDB transaction is open because DuckDB COMMIT or ROLLBACK does not control Redshift operations. Unless DuckDB had already run part of this statement as a separate statement that wrote, as a PIVOT without an IN list does, the DuckDB transaction is still usable. If you are not sure, run SELECT 1: if it fails with "Current transaction is aborted", run ROLLBACK (COMMIT would also roll it back, without an error); otherwise commit or roll back the transaction. Then run redshift_query outside a DuckDB transaction, and enable autocommit if your client disabled it. If a Redshift transaction is already open on this handle, continue working on it through redshift_query after the DuckDB transaction ends.
+
+query I
+SELECT count(*) FROM local;
+----
+1
+
+statement error
+SELECT (SELECT count(*) FROM redshift_query('rs', 'rows=1'));
+----
+Binder Error: redshift_query cannot run while a DuckDB transaction is open because DuckDB COMMIT or ROLLBACK does not control Redshift operations. Unless DuckDB had already run part of this statement
+
+statement error
+SELECT EXISTS (SELECT * FROM redshift_query('rs', 'rows=1'));
+----
+Binder Error: redshift_query cannot run while a DuckDB transaction is open because DuckDB COMMIT or ROLLBACK does not control Redshift operations. Unless DuckDB had already run part of this statement
+
+statement error
+WITH t AS NOT MATERIALIZED (SELECT * FROM redshift_query('rs', 'rows=1')) SELECT * FROM t;
+----
+Binder Error: redshift_query cannot run while a DuckDB transaction is open because DuckDB COMMIT or ROLLBACK does not control Redshift operations. Unless DuckDB had already run part of this statement
+
+statement error
+INSERT INTO local SELECT 2 FROM redshift_query('rs', 'rows=1');
+----
+Binder Error: redshift_query cannot run while a DuckDB transaction is open because DuckDB COMMIT or ROLLBACK does not control Redshift operations. Unless DuckDB had already run part of this statement
+
+statement ok
+INSERT INTO local VALUES (3);
+
+statement ok
+COMMIT;
+
+query I
+SELECT list(i ORDER BY i) FROM local;
+----
+[1, 3]
+
+statement ok
+RESET default_transaction_invalidation_policy;
+
+statement ok
+DELETE FROM local;
+
+# ---------------------------------------------------------------------------
+# Or set for the open transaction, through current_transaction_invalidation_policy, which also works
+# in a transaction already open under the default policy.
+# ---------------------------------------------------------------------------
+statement ok
+BEGIN;
+
+statement ok
+INSERT INTO local VALUES (1);
+
+statement ok
+SET current_transaction_invalidation_policy = 'SYNTACTIC_ERRORS_DO_NOT_INVALIDATE';
+
+statement error
+SELECT * FROM redshift_query('rs', 'rows=1');
+----
+Binder Error: redshift_query cannot run while a DuckDB transaction is open because DuckDB COMMIT or ROLLBACK does not control Redshift operations. Unless DuckDB had already run part of this statement
+
+statement ok
+INSERT INTO local VALUES (2);
+
+statement ok
+COMMIT;
+
+query I
+SELECT list(i ORDER BY i) FROM local;
+----
+[1, 2]
+
+# Only the two PREPAREs described, outside a transaction; nothing was executed inside one.
+query III
+SELECT mock_opened(), mock_described(), mock_executed();
+----
+1	3	1
+
+query I
+EXECUTE later;
+----
+1
+
+# ---------------------------------------------------------------------------
+# Once the DuckDB transaction ends, redshift_query continues the Redshift transaction on the same
+# session, and the user ends it. DuckDB's COMMIT and ROLLBACK above sent nothing.
+# ---------------------------------------------------------------------------
+query I
+SELECT c0 FROM redshift_query('rs', 'INSERT INTO t VALUES (1)');
+----
+INSERT INTO t VALUES (1)
+
+query I
+SELECT c0 FROM redshift_query('rs', 'COMMIT');
+----
+COMMIT
+
+query III
+SELECT mock_opened(), mock_described(), mock_executed();
+----
+1	5	4
+
+# ---------------------------------------------------------------------------
+# DuckDB's EXPLAIN_SQL and EXPLAIN_SQL_STRICT statement verification run the nested EXPLAIN of a
+# parameter-free SELECT with autocommit off, so the gate refuses it, before any transport call.
+# DuckDB ends that transaction, so none is left open.
+# ---------------------------------------------------------------------------
+foreach mode EXPLAIN_SQL EXPLAIN_SQL_STRICT
+
+statement ok
+SET debug_verify_statement = '{mode}';
+
+statement error
+SELECT count(*) FROM redshift_query('rs', 'rows=1');
+----
+redshift_query cannot run while a DuckDB transaction is open
+
+statement ok
+RESET debug_verify_statement;
+
+endloop
+
+query III
+SELECT mock_opened(), mock_described(), mock_executed();
+----
+1	5	4
+
+query I
+SELECT count(*) FROM redshift_query('rs', 'rows=1');
+----
+1
+
+query III
+SELECT mock_opened(), mock_described(), mock_executed();
+----
+1	6	5

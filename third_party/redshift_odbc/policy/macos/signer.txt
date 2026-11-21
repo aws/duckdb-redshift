@@ -1,0 +1,17 @@
+# Who signs the macOS driver package, and how. Verification accepts the package only when its
+# signing certificate is the installer name below with the team's ID, chaining through the pinned
+# Developer ID intermediate in signing/macos/ to the pinned Apple root, and only when its checksums
+# use the one algorithm below. A different signer, team or algorithm is a reviewed change to this
+# file, never automatic. Read from an earlier signed release and found unchanged in the 2.3.0.0
+# and 2.3.1.0 packages. Each key has exactly one row.
+#
+#   checksum     the algorithm of the package's table-of-contents checksum and of every checksum
+#                it records for the files verification reads: 2.3.1.0 uses sha1 for all of them,
+#                and its RSA and CMS signatures over that checksum are SHA-1 too
+#                (sha1WithRSAEncryption); only its signing certificate is signed with SHA-256
+#   installer    the package signer's name, "Developer ID Installer: <organization>"; its
+#                certificate's CN is "<name> (<team>)" and its O the organization
+#   team         the Team ID, the certificate's OU and UID
+checksum     sha1
+installer    Developer ID Installer: AMZN Mobile LLC
+team         94KV3E626L

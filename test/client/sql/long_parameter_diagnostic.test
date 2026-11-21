@@ -1,0 +1,35 @@
+# name: test/client/sql/long_parameter_diagnostic.test
+# description: live: a 22P02 that echoes a 300-byte bound value shows none of it
+# group: [sql]
+
+require-env REDSHIFT_TEST_CLIENT odbc
+
+# Live only: it needs REDSHIFT_TEST_LIVE_REGION, the region of a workgroup this process's default
+# AWS credential chain can reach, and a build with a driver.
+require-env REDSHIFT_TEST_LIVE_REGION
+
+# The account-backed workgroup the live tests reach (test/README.md, "Live variables").
+require-env REDSHIFT_TEST_LIVE_WORKGROUP
+
+require-env REDSHIFT_TEST_LIVE_ACCOUNT_ID
+
+require redshift
+
+statement ok
+ATTACH '' AS rs (TYPE redshift, REGION '{REDSHIFT_TEST_LIVE_REGION}', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP '{REDSHIFT_TEST_LIVE_WORKGROUP}', ACCOUNT_ID '{REDSHIFT_TEST_LIVE_ACCOUNT_ID}');
+
+# The value is 300 bytes, with white space inside it. Driver 2.3.0.0 keeps 326 bytes of a message
+# (source v2.3.0, rsutil.c addError), so the message that echoes the value is cut inside it. This
+# block holds only with the next, which pins the marker and the SQLSTATE.
+statement error
+SELECT * FROM redshift_query('rs', 'SELECT $1::int', params := ['QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq wvq'])
+----
+<!REGEX>:(?s).*(QXZJ|wvq).*
+
+# The same failure carries the value's marker where the server echoed it, and its message ends
+# with its SQLSTATE in the client's form. The runner adds a newline to the error
+# before it full-matches the pattern.
+statement error
+SELECT * FROM redshift_query('rs', 'SELECT $1::int', params := ['QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq QXZJ wvq wvq'])
+----
+<REGEX>:(?s).*<param 1>.*\nSQLSTATE: 22P02\n

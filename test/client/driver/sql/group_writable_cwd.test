@@ -1,0 +1,26 @@
+# name: test/client/driver/sql/group_writable_cwd.test
+# description: a current directory the group can write does not stop the connection (run-e2e.sh)
+# group: [sql]
+
+require-env REDSHIFT_TEST_CLIENT odbc
+
+require-env DUCKDB_REDSHIFT_TEST_E2E group-writable-cwd
+
+# Only with run-e2e.sh's fake keys and no session token, so a unit tester started by hand on a host with a
+# network cannot connect with the caller's own credentials (CREDENTIAL_PROVIDER aws_default_chain, with no PROFILE,
+# takes the keys from the environment first).
+require-env AWS_ACCESS_KEY_ID test-not-a-key
+
+require-env AWS_SECRET_ACCESS_KEY test-not-a-secret
+
+require-env-not AWS_SESSION_TOKEN
+
+require redshift
+
+# run-e2e.sh runs this file in a directory of mode 0770: the current directory is not a reason to refuse.
+# The driver loads and fails the connect itself: run-e2e.sh aims it at closed ports on the host,
+# which refuse it.
+statement error
+ATTACH '' AS rs (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'analytics', ACCOUNT_ID '012345678901')
+----
+<REGEX>:.*IO Error: Cannot attach rs: Could not connect to Redshift at 127\.0\.0\.1 \(region us-east-1, workgroup [^)]+\): the connection attempt failed\..*

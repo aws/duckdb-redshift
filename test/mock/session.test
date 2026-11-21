@@ -1,0 +1,191 @@
+# name: test/mock/session.test
+# description: redshift_query keeps one Redshift session per attach handle and DuckDB connection, opened on its first use
+# group: [mock]
+
+require-env REDSHIFT_TEST_CLIENT mock
+
+require redshift
+
+# Opens and closes are counted from the lines the mock logs, through DuckDB's logger, for each
+# connection it opens and closes.
+statement ok
+CALL enable_logging(level = 'debug');
+
+statement ok
+CREATE MACRO mock_opened() AS (SELECT count(*) FROM duckdb_logs WHERE message LIKE 'redshift mock: opened a connection to %');
+
+statement ok
+CREATE MACRO mock_closed() AS (SELECT count(*) FROM duckdb_logs WHERE message LIKE 'redshift mock: closed a connection to %');
+
+# ---------------------------------------------------------------------------
+# ATTACH opens the attaching DuckDB connection's session on the handle, and what DuckDB does with every
+# attached database opens nothing more.
+# ---------------------------------------------------------------------------
+statement ok
+ATTACH '' AS rs (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+statement ok
+SELECT * FROM duckdb_databases();
+
+statement ok
+PRAGMA database_size;
+
+statement ok
+CHECKPOINT rs;
+
+query II
+SELECT mock_opened(), mock_closed();
+----
+1	0
+
+# ---------------------------------------------------------------------------
+# A handle that does not resolve, or is not a Redshift handle, is refused before any connection
+# opens.
+# ---------------------------------------------------------------------------
+statement error
+SELECT * FROM redshift_query('rs_missing', 'rows=1 cols=1');
+----
+Binder Error: redshift_query: no attached database is named "rs_missing". Attach a Redshift handle first with ATTACH '' AS rs_missing (TYPE redshift, ...)
+
+statement error
+SELECT * FROM redshift_query('', 'rows=1 cols=1');
+----
+Binder Error: redshift_query: the handle argument is empty. Pass the name of a Redshift handle attached with ATTACH '' AS <name> (TYPE redshift, ...)
+
+statement ok
+ATTACH ':memory:' AS local_db;
+
+statement error
+SELECT * FROM redshift_query('local_db', 'rows=1 cols=1');
+----
+Binder Error: redshift_query: "local_db" is a duckdb database, not a Redshift handle. Attach one with ATTACH '' AS <name> (TYPE redshift, ...)
+
+query II
+SELECT mock_opened(), mock_closed();
+----
+1	0
+
+# ---------------------------------------------------------------------------
+# The first call uses the pair's connection, which ATTACH opened with the handle's configuration,
+# for both bind and execution. Later calls reuse it: a bind-only DESCRIBE, a no-result statement, and
+# a statement Redshift refuses all keep it.
+# ---------------------------------------------------------------------------
+query I
+SELECT c0 FROM redshift_query('rs', 'rows=1 cols=1');
+----
+r0c0
+
+query II
+SELECT mock_opened(), mock_closed();
+----
+1	0
+
+query I
+SELECT c0 FROM redshift_query('RS', 'SELECT 1');
+----
+SELECT 1
+
+statement ok
+DESCRIBE SELECT * FROM redshift_query('rs', 'rows=1 cols=2');
+
+query I
+SELECT rowcount FROM redshift_query('rs', 'norows');
+----
+0
+
+statement error
+SELECT * FROM redshift_query('rs', 'error=refused');
+----
+Redshift rejected the statement: refused
+
+query II
+SELECT mock_opened(), mock_closed();
+----
+1	0
+
+# ---------------------------------------------------------------------------
+# Each handle has its own session, even one with the same configuration, and so does each DuckDB
+# connection on a handle.
+# ---------------------------------------------------------------------------
+statement ok
+ATTACH '' AS rs_same_config (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+statement ok
+ATTACH '' AS rs_other (TYPE redshift, REGION 'eu-west-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+statement ok
+SELECT * FROM redshift_query('rs_same_config', 'rows=1 cols=1');
+
+statement ok
+SELECT * FROM redshift_query('rs_other', 'rows=1 cols=1');
+
+statement ok
+SELECT * FROM redshift_query('rs_other', 'rows=1 cols=1');
+
+query II
+SELECT mock_opened(), mock_closed();
+----
+3	0
+
+query I
+SELECT count(*) FROM duckdb_logs WHERE message = 'redshift mock: opened a connection to region eu-west-1, workgroup test-wg, account 012345678901';
+----
+1
+
+statement ok con1
+SELECT * FROM redshift_query('rs', 'rows=1 cols=1');
+
+statement ok con1
+SELECT * FROM redshift_query('rs', 'rows=1 cols=1');
+
+query II
+SELECT mock_opened(), mock_closed();
+----
+4	0
+
+# ---------------------------------------------------------------------------
+# DETACH closes the handle's sessions, on every DuckDB connection. The name then resolves to
+# nothing, and a handle attached again under it opens a session of its own.
+# ---------------------------------------------------------------------------
+statement ok
+DETACH rs;
+
+query II
+SELECT mock_opened(), mock_closed();
+----
+4	2
+
+statement error
+SELECT * FROM redshift_query('rs', 'rows=1 cols=1');
+----
+no attached database is named "rs"
+
+statement ok
+ATTACH '' AS rs (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+statement ok
+SELECT * FROM redshift_query('rs', 'rows=1 cols=1');
+
+query II
+SELECT mock_opened(), mock_closed();
+----
+5	2
+
+# ---------------------------------------------------------------------------
+# ATTACH OR REPLACE replaces the handle, closes the old one's sessions, and opens its own on the new one.
+# ---------------------------------------------------------------------------
+statement ok
+ATTACH OR REPLACE '' AS rs (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+query II
+SELECT mock_opened(), mock_closed();
+----
+6	3
+
+statement ok
+SELECT * FROM redshift_query('rs', 'rows=1 cols=1');
+
+query II
+SELECT mock_opened(), mock_closed();
+----
+6	3

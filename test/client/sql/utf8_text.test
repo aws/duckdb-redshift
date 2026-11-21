@@ -1,0 +1,43 @@
+# name: test/client/sql/utf8_text.test
+# description: live: multibyte and 4-byte UTF-8 characters arrive unchanged over a row array, and a 4-byte one across two SQLGetData reads
+# group: [sql]
+
+require-env REDSHIFT_TEST_CLIENT odbc
+
+# Live only (test/README.md, "Live variables"): it needs REDSHIFT_TEST_LIVE_REGION and a build with
+# the embedded driver.
+require-env REDSHIFT_TEST_LIVE_REGION
+
+# The account-backed workgroup the live tests reach (test/README.md, "Live variables").
+require-env REDSHIFT_TEST_LIVE_WORKGROUP
+
+require-env REDSHIFT_TEST_LIVE_ACCOUNT_ID
+
+require redshift
+
+statement ok
+ATTACH '' AS rs (TYPE redshift, REGION '{REDSHIFT_TEST_LIVE_REGION}', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP '{REDSHIFT_TEST_LIVE_WORKGROUP}', ACCOUNT_ID '{REDSHIFT_TEST_LIVE_ACCOUNT_ID}');
+
+# A varchar(300) is bounded and a varchar(65535) long. The temporary table lives in the attached
+# connection's session.
+statement ok
+SELECT * FROM redshift_query('rs', 'CREATE TEMP TABLE utf8_text_values (bounded VARCHAR(300), long VARCHAR(65535))');
+
+# The server builds the text from its bytes, so only the fetch decides what arrives: a, U+00E9,
+# U+20AC, U+1F600 and z, and in the long column U+1F600 after 4093 letters, across two reads.
+# PART_BYTES (4096, odbc_statement.cpp) splits it: a text part holds 4095 bytes and its NUL, so
+# two of its four bytes come in each read. A change to PART_BYTES must move the 4093.
+statement ok
+SELECT * FROM redshift_query('rs', 'INSERT INTO utf8_text_values VALUES (FROM_VARBYTE(FROM_HEX(''61C3A9E282ACF09F98807A''), ''utf8''), REPEAT(''a'', 4093) || FROM_VARBYTE(FROM_HEX(''F09F98807A''), ''utf8''))');
+
+# A result is bound over a row array only when every column in it is bounded, so each column is
+# read alone: the varchar(300) over a row array, the varchar(65535) with SQLGetData.
+query T
+SELECT hex(bounded) FROM redshift_query('rs', 'SELECT bounded FROM utf8_text_values');
+----
+61C3A9E282ACF09F98807A
+
+query IT
+SELECT strlen(long), hex(substr(long, 4094)) FROM redshift_query('rs', 'SELECT long FROM utf8_text_values');
+----
+4098	F09F98807A

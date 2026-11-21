@@ -1,0 +1,92 @@
+# name: test/client/sql/bulk_fetch_constants.test
+# description: live: as constants, a bound varchar(300) value of 300 bytes, the temporal and DECIMAL edges at their widest, and results across many row arrays return exactly
+# group: [sql]
+
+require-env REDSHIFT_TEST_CLIENT odbc
+
+# Live only (test/README.md, "Live variables"): it needs REDSHIFT_TEST_LIVE_REGION and a build with
+# the embedded driver.
+require-env REDSHIFT_TEST_LIVE_REGION
+
+# The account-backed workgroup the live tests reach (test/README.md, "Live variables").
+require-env REDSHIFT_TEST_LIVE_WORKGROUP
+
+require-env REDSHIFT_TEST_LIVE_ACCOUNT_ID
+
+require redshift
+
+# DuckDB's TimeZone setting, which the TIMESTAMPTZ cases fix, is the icu extension's.
+require icu
+
+statement ok
+ATTACH '' AS rs (TYPE redshift, REGION '{REDSHIFT_TEST_LIVE_REGION}', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP '{REDSHIFT_TEST_LIVE_WORKGROUP}', ACCOUNT_ID '{REDSHIFT_TEST_LIVE_ACCOUNT_ID}');
+
+# Every connection sets MaxVarcharSize=0, so the driver reports the declared 300 bytes, and the
+# column is bound at 301. Constants cast to a column's type, so a principal that may not write runs
+# this file; the leader node prints them, and bulk_fetch.test reads them stored.
+query II
+SELECT length(v), v = repeat('a', 300) FROM redshift_query('rs', 'SELECT CAST(REPEAT(''a'', 300) AS VARCHAR(300)) AS v');
+----
+300	true
+
+# 75 4-byte characters fill the 300 bytes too, so a width counted in characters would cut them.
+query II
+SELECT strlen(v), v = repeat(chr(128512), 75) FROM redshift_query('rs', 'SELECT CAST(REPEAT(FROM_VARBYTE(FROM_HEX(''F09F9880''), ''utf8''), 75) AS VARCHAR(300)) AS v');
+----
+300	true
+
+# TIMESTAMPTZ prints in the session's time zone, so the test fixes it.
+statement ok
+SET TimeZone = 'UTC';
+
+# A TIMETZ, a fractional TIME, a BC date, a negative full-precision NUMERIC(38,10), and a BC
+# TIMESTAMP and TIMESTAMPTZ with microseconds, each above the size the driver reports for its type.
+query TTTTTT
+SELECT tz::VARCHAR, t::VARCHAR, d::VARCHAR, n::VARCHAR, ts::VARCHAR, tstz::VARCHAR FROM redshift_query('rs', 'SELECT CAST(''12:34:56.789012+00'' AS TIMETZ) AS tz, CAST(''23:59:59.999999'' AS TIME) AS t, CAST(''4713-01-01 BC'' AS DATE) AS d, CAST(-9999999999999999999999999999.9999999999 AS NUMERIC(38,10)) AS n, CAST(''4713-01-01 00:00:00.123456 BC'' AS TIMESTAMP) AS ts, CAST(''4713-01-01 00:00:00.123456+00 BC'' AS TIMESTAMPTZ) AS tstz');
+----
+12:34:56.789012+00	23:59:59.999999	4713-01-01 (BC)	-9999999999999999999999999999.9999999999	4713-01-01 (BC) 00:00:00.123456	4713-01-01 (BC) 00:00:00.123456+00
+
+# Redshift prints these offsets without their seconds, unlike PostgreSQL, so a TIMETZ's text is
+# at most 21 bytes, within its bound 24; a negative NUMERIC(p,p)'s is p + 3 (its sign, 0 and point).
+# DuckDB prints a DECIMAL(p,p) without the 0.
+query TT
+SELECT tz::VARCHAR, n::VARCHAR FROM redshift_query('rs', 'SELECT CAST(''23:59:59.999999+15:59:59'' AS TIMETZ) AS tz, CAST(-0.9999999999999999 AS NUMERIC(16,16)) AS n');
+----
+23:59:59.999999+15:59	-.9999999999999999
+
+# In a session time zone whose offset has seconds, as New York's had before 1883-11-18, the dropped
+# seconds move the instant: 04:56:02 UTC arrives 2 seconds early. The client's setup sets UTC, so only
+# a caller's SET reaches this. The setup's UTC is restored after.
+statement ok
+SELECT * FROM redshift_query('rs', 'SET timezone TO ''America/New_York''');
+
+query T
+SELECT tstz::VARCHAR FROM redshift_query('rs', 'SELECT CAST(''4713-01-01 04:56:02.123456+00 BC'' AS TIMESTAMPTZ) AS tstz');
+----
+4713-01-01 (BC) 04:56:00.123456+00
+
+statement ok
+SELECT * FROM redshift_query('rs', 'SET timezone TO ''UTC''');
+
+statement ok
+RESET TimeZone;
+
+# The one long column here, read with SQLGetData.
+query I
+SELECT length(v) FROM redshift_query('rs', 'SELECT CAST(REPEAT(''b'', 5000) AS VARCHAR(5000)) AS v');
+----
+5000
+
+# More rows than the ring's four sets of 2048 hold, so it comes round to the first set again; the
+# row arrays line up with the driver's 2048-row batches, and a short one ends the result. Counted on
+# the DuckDB side.
+query II
+SELECT count(*), sum(g) FROM redshift_query('rs', 'SELECT g FROM generate_series(1, 10000) AS g');
+----
+10000	50005000
+
+# 150 INTEGER columns: once their values count, the 16 MiB budget cuts the row array below 2048 rows.
+query III
+SELECT count(*), sum(c1), sum(c150) FROM redshift_query('rs', 'SELECT g AS c1, g AS c2, g AS c3, g AS c4, g AS c5, g AS c6, g AS c7, g AS c8, g AS c9, g AS c10, g AS c11, g AS c12, g AS c13, g AS c14, g AS c15, g AS c16, g AS c17, g AS c18, g AS c19, g AS c20, g AS c21, g AS c22, g AS c23, g AS c24, g AS c25, g AS c26, g AS c27, g AS c28, g AS c29, g AS c30, g AS c31, g AS c32, g AS c33, g AS c34, g AS c35, g AS c36, g AS c37, g AS c38, g AS c39, g AS c40, g AS c41, g AS c42, g AS c43, g AS c44, g AS c45, g AS c46, g AS c47, g AS c48, g AS c49, g AS c50, g AS c51, g AS c52, g AS c53, g AS c54, g AS c55, g AS c56, g AS c57, g AS c58, g AS c59, g AS c60, g AS c61, g AS c62, g AS c63, g AS c64, g AS c65, g AS c66, g AS c67, g AS c68, g AS c69, g AS c70, g AS c71, g AS c72, g AS c73, g AS c74, g AS c75, g AS c76, g AS c77, g AS c78, g AS c79, g AS c80, g AS c81, g AS c82, g AS c83, g AS c84, g AS c85, g AS c86, g AS c87, g AS c88, g AS c89, g AS c90, g AS c91, g AS c92, g AS c93, g AS c94, g AS c95, g AS c96, g AS c97, g AS c98, g AS c99, g AS c100, g AS c101, g AS c102, g AS c103, g AS c104, g AS c105, g AS c106, g AS c107, g AS c108, g AS c109, g AS c110, g AS c111, g AS c112, g AS c113, g AS c114, g AS c115, g AS c116, g AS c117, g AS c118, g AS c119, g AS c120, g AS c121, g AS c122, g AS c123, g AS c124, g AS c125, g AS c126, g AS c127, g AS c128, g AS c129, g AS c130, g AS c131, g AS c132, g AS c133, g AS c134, g AS c135, g AS c136, g AS c137, g AS c138, g AS c139, g AS c140, g AS c141, g AS c142, g AS c143, g AS c144, g AS c145, g AS c146, g AS c147, g AS c148, g AS c149, g AS c150 FROM generate_series(1, 3000) AS g');
+----
+3000	4501500	4501500

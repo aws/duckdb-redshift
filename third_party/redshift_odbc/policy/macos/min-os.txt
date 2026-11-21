@@ -1,0 +1,15 @@
+# The minimum macOS version.
+#
+#   duckdb  the floor DuckDB builds macOS extensions for: CMAKE_OSX_DEPLOYMENT_TARGET 11.0, which
+#           the pinned DuckDB sets for every OSX_BUILD_ARCH build and the pinned extension-ci-tools
+#           sets for its vcpkg ports
+#   driver  the newest minimum a driver slice's LC_BUILD_VERSION may name; verification fails
+#           above it. It is never below duckdb; above duckdb, the extension's driver loads only on
+#           macOS this version or later, which is a reviewed decision.
+#
+# 2.3.1.0 names 11.7.0 in both slices. macOS 11.7 is a host requirement of the extension's macOS
+# builds, which docs/platforms.md states, since macOS 11 is out of support and 11.7 is its
+# last minor release. Raising the driver row drops more hosts, and is a reviewed decision of its
+# own.
+duckdb  11.0
+driver  11.7

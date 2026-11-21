@@ -1,0 +1,38 @@
+# name: test/client/sql/early_close.test
+# description: live: a LIMIT that DuckDB applies destroys a large result before its end, and the session it ran on answers the next statement
+# group: [sql]
+
+require-env REDSHIFT_TEST_CLIENT odbc
+
+# Live only (test/README.md, "Live variables"): it needs REDSHIFT_TEST_LIVE_REGION and a build with
+# the embedded driver.
+require-env REDSHIFT_TEST_LIVE_REGION
+
+# The account-backed workgroup the live tests reach (test/README.md, "Live variables").
+require-env REDSHIFT_TEST_LIVE_WORKGROUP
+
+require-env REDSHIFT_TEST_LIVE_ACCOUNT_ID
+
+require redshift
+
+statement ok
+ATTACH '' AS rs (TYPE redshift, REGION '{REDSHIFT_TEST_LIVE_REGION}', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP '{REDSHIFT_TEST_LIVE_WORKGROUP}', ACCOUNT_ID '{REDSHIFT_TEST_LIVE_ACCOUNT_ID}');
+
+# The session the early close runs on, by its process id.
+statement ok
+CREATE TABLE early_close_session AS SELECT pid FROM redshift_query('rs', 'SELECT pg_backend_pid() AS pid');
+
+# DuckDB stops the scan after its first batch, so the result is destroyed with most of its 1,000,000
+# rows unread.
+query I
+SELECT count(*) FROM (SELECT g FROM redshift_query('rs', 'SELECT g::bigint AS g FROM generate_series(1, 1000000) AS t(g)') LIMIT 5);
+----
+5
+
+# The early close keeps the connection: the same session, by its process id, answers the next
+# statement. Any answer alone would pass on a new session too.
+query I
+SELECT count(*) FROM early_close_session, redshift_query('rs', 'SELECT pg_backend_pid() AS pid') later
+WHERE later.pid = early_close_session.pid;
+----
+1

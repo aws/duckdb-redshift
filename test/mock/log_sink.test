@@ -1,0 +1,34 @@
+# name: test/mock/log_sink.test
+# description: redshift_query's mock connections log their open and close to DuckDB's logger at debug level
+# group: [mock]
+
+require-env REDSHIFT_TEST_CLIENT mock
+
+require redshift
+
+statement ok
+CALL enable_logging(level = 'debug');
+
+statement ok
+ATTACH '' AS rs (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+statement ok
+SELECT * FROM redshift_query('rs', 'rows=1 cols=1');
+
+# The handle keeps the session open for later calls on this DuckDB connection.
+query II
+SELECT bool_or(message = 'redshift mock: opened a connection to region us-east-1, workgroup test-wg, account 012345678901'),
+       bool_or(message = 'redshift mock: closed a connection to region us-east-1, workgroup test-wg, account 012345678901')
+FROM duckdb_logs WHERE log_level = 'DEBUG';
+----
+true	false
+
+# DETACH closes it.
+statement ok
+DETACH rs;
+
+query I
+SELECT bool_or(message = 'redshift mock: closed a connection to region us-east-1, workgroup test-wg, account 012345678901')
+FROM duckdb_logs WHERE log_level = 'DEBUG';
+----
+true

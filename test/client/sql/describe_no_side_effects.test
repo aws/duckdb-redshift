@@ -1,0 +1,68 @@
+# name: test/client/sql/describe_no_side_effects.test
+# description: live: binding redshift_query describes an INSERT and a CREATE TEMP TABLE and runs neither
+# group: [sql]
+
+require-env REDSHIFT_TEST_CLIENT odbc
+
+# Live only (test/README.md, "Live variables"): it needs REDSHIFT_TEST_LIVE_REGION and a build with
+# the embedded driver.
+require-env REDSHIFT_TEST_LIVE_REGION
+
+# The account-backed workgroup the live tests reach (test/README.md, "Live variables").
+require-env REDSHIFT_TEST_LIVE_WORKGROUP
+
+require-env REDSHIFT_TEST_LIVE_ACCOUNT_ID
+
+require redshift
+
+statement ok
+ATTACH '' AS rs (TYPE redshift, REGION '{REDSHIFT_TEST_LIVE_REGION}', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP '{REDSHIFT_TEST_LIVE_WORKGROUP}', ACCOUNT_ID '{REDSHIFT_TEST_LIVE_ACCOUNT_ID}');
+
+# Every write is to a temporary table in the attached connection's session, made here for the INSERT.
+statement ok
+SELECT * FROM redshift_query('rs', 'CREATE TEMP TABLE describe_gate_rows (a INTEGER)');
+
+# DESCRIBE and PREPARE bind the scan, which describes the statement and runs nothing. An INSERT has
+# no result set, so the scan's one column is its row count.
+query TT
+SELECT column_name, column_type FROM (DESCRIBE SELECT * FROM redshift_query('rs', 'INSERT INTO describe_gate_rows VALUES (1)'));
+----
+rowcount	BIGINT
+
+statement ok
+PREPARE insert_two AS SELECT * FROM redshift_query('rs', 'INSERT INTO describe_gate_rows VALUES (2)');
+
+statement ok
+DEALLOCATE insert_two;
+
+query I
+SELECT * FROM redshift_query('rs', 'SELECT count(*) FROM describe_gate_rows');
+----
+0
+
+query TT
+SELECT column_name, column_type FROM (DESCRIBE SELECT * FROM redshift_query('rs', 'CREATE TEMP TABLE describe_gate_created (a INTEGER)'));
+----
+rowcount	BIGINT
+
+statement ok
+PREPARE create_table AS SELECT * FROM redshift_query('rs', 'CREATE TEMP TABLE describe_gate_created (a INTEGER)');
+
+statement ok
+DEALLOCATE create_table;
+
+# No table was created, so the session's search finds none. The runner adds a newline before it
+# full-matches.
+statement error
+SELECT * FROM redshift_query('rs', 'SELECT count(*) FROM describe_gate_created');
+----
+<REGEX>:(?s)Binder Error: Redshift refused the statement: ERROR:  relation "describe_gate_created" does not exist\nSQLSTATE: 42P01\n.*
+
+# The control: the same INSERT run, not only described, is counted.
+statement ok
+SELECT * FROM redshift_query('rs', 'INSERT INTO describe_gate_rows VALUES (1)');
+
+query I
+SELECT * FROM redshift_query('rs', 'SELECT count(*) FROM describe_gate_rows');
+----
+1

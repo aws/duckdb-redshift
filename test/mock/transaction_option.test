@@ -1,0 +1,497 @@
+# name: test/mock/transaction_option.test
+# description: redshift_allow_query_in_duckdb_transaction lets redshift_query run inside an explicit DuckDB transaction, with a warning, except on a handle the transaction attached
+# group: [mock]
+
+require-env REDSHIFT_TEST_CLIENT mock
+
+require redshift
+
+statement ok
+CALL enable_logging(level = 'debug');
+
+statement ok
+CREATE MACRO mock_opened() AS (SELECT count(*) FROM duckdb_logs WHERE message LIKE 'redshift mock: opened a connection to %');
+
+statement ok
+CREATE MACRO mock_described() AS (SELECT count(*) FROM duckdb_logs WHERE message LIKE 'redshift mock: described a statement on %');
+
+statement ok
+CREATE MACRO mock_executed() AS (SELECT count(*) FROM duckdb_logs WHERE message LIKE 'redshift mock: executed a statement on %');
+
+# The warning each SET to true logs.
+statement ok
+CREATE MACRO set_warnings() AS (SELECT count(*) FROM duckdb_logs WHERE log_level = 'WARNING' AND message = 'redshift_query: redshift_allow_query_in_duckdb_transaction was set to true, so redshift_query can run inside a DuckDB transaction. DuckDB COMMIT or ROLLBACK does not control its Redshift operations.');
+
+# The warning the first call the option lets through logs, once per DuckDB connection.
+statement ok
+CREATE MACRO use_warnings() AS (SELECT count(*) FROM duckdb_logs WHERE log_level = 'WARNING' AND message = 'redshift_query: running inside a DuckDB transaction because redshift_allow_query_in_duckdb_transaction is on. DuckDB COMMIT or ROLLBACK does not control the Redshift operations it runs there. This is logged once per DuckDB connection.');
+
+statement ok
+ATTACH '' AS rs (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+statement ok
+CREATE TABLE local (i INTEGER);
+
+# ---------------------------------------------------------------------------
+# Off by default, and a debug option: duckdb_settings() lists it only when asked for debug settings.
+# ---------------------------------------------------------------------------
+query I
+SELECT current_setting('redshift_allow_query_in_duckdb_transaction');
+----
+false
+
+query I
+SELECT count(*) FROM duckdb_settings() WHERE name = 'redshift_allow_query_in_duckdb_transaction';
+----
+0
+
+query II
+SELECT value, input_type FROM duckdb_settings(debug := true) WHERE name = 'redshift_allow_query_in_duckdb_transaction';
+----
+false	BOOLEAN
+
+statement ok
+BEGIN;
+
+statement error
+SELECT * FROM redshift_query('rs', 'rows=1');
+----
+Binder Error: redshift_query cannot run while a DuckDB transaction is open because DuckDB COMMIT or ROLLBACK does not control Redshift operations.
+
+statement ok
+ROLLBACK;
+
+# NULL would leave it neither on nor off, so the SET is refused, and the value stays.
+statement error
+SET redshift_allow_query_in_duckdb_transaction = NULL;
+----
+Invalid Input Error: redshift_allow_query_in_duckdb_transaction cannot be NULL. Set it to true or false, or RESET it
+
+query I
+SELECT current_setting('redshift_allow_query_in_duckdb_transaction');
+----
+false
+
+# Setting it to false logs nothing; each SET to true logs the warning.
+statement ok
+SET redshift_allow_query_in_duckdb_transaction = false;
+
+query I
+SELECT set_warnings();
+----
+0
+
+statement ok
+SET redshift_allow_query_in_duckdb_transaction = true;
+
+query I
+SELECT set_warnings();
+----
+1
+
+# ---------------------------------------------------------------------------
+# On: outside a transaction nothing changes, and nothing is logged about a transaction.
+# ---------------------------------------------------------------------------
+query I
+SELECT count(*) FROM redshift_query('rs', 'rows=1');
+----
+1
+
+query I
+SELECT use_warnings();
+----
+0
+
+# Prepared outside a transaction, so that only execution's gate meets the transaction below.
+statement ok
+PREPARE later AS SELECT count(*) FROM redshift_query('rs', 'rows=2');
+
+query I
+SELECT mock_executed();
+----
+1
+
+# A call refused inside a transaction, at bind or at execution, does not use up the warning: it is
+# logged just before a call's first transport call.
+statement ok
+BEGIN;
+
+statement error
+SELECT * FROM redshift_query('nope', 'rows=1');
+----
+redshift_query: no attached database is named "nope"
+
+statement ok
+ROLLBACK;
+
+statement ok
+ATTACH '' AS gone (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+statement ok
+PREPARE on_gone AS SELECT count(*) FROM redshift_query('gone', 'rows=1');
+
+statement ok
+DETACH gone;
+
+statement ok
+BEGIN;
+
+statement error
+EXECUTE on_gone;
+----
+Executor Error: redshift_query: attach handle "gone" was detached, or an ATTACH under its name was rolled back, after this statement was bound
+
+statement ok
+ROLLBACK;
+
+query II
+SELECT use_warnings(), mock_executed();
+----
+0	1
+
+# Inside one, redshift_query runs at bind and at execution. The first call logs the warning; later
+# ones on this DuckDB connection do not. DuckDB's ROLLBACK undoes the DuckDB insert and not the
+# Redshift statements, which have run.
+statement ok
+BEGIN;
+
+statement ok
+INSERT INTO local VALUES (1);
+
+# A bind alone, which describes the statement on Redshift, logs it.
+statement ok
+PREPARE in_transaction AS SELECT count(*) FROM redshift_query('rs', 'rows=1');
+
+query I
+SELECT use_warnings();
+----
+1
+
+query I
+SELECT count(*) FROM redshift_query('rs', 'rows=1');
+----
+1
+
+query I
+EXECUTE later;
+----
+2
+
+query I
+SELECT count(*) FROM local;
+----
+1
+
+statement ok
+ROLLBACK;
+
+query II
+SELECT (SELECT count(*) FROM local), mock_executed();
+----
+0	3
+
+query I
+SELECT use_warnings();
+----
+1
+
+# A Redshift transaction the user opens through redshift_query inside a DuckDB transaction is the
+# user's alone: the DuckDB COMMIT sends nothing to Redshift, and the user's own
+# COMMIT, after the DuckDB transaction, runs on the same session. The mock echoes the statement;
+# it keeps no Redshift transaction state of its own.
+statement ok
+BEGIN;
+
+query I
+SELECT c0 FROM redshift_query('rs', 'BEGIN');
+----
+BEGIN
+
+query II
+SELECT mock_opened(), mock_executed();
+----
+2	4
+
+statement ok
+COMMIT;
+
+query II
+SELECT mock_opened(), mock_executed();
+----
+2	4
+
+query I
+SELECT c0 FROM redshift_query('rs', 'COMMIT');
+----
+COMMIT
+
+query II
+SELECT mock_opened(), mock_executed();
+----
+2	5
+
+# The other checks still apply inside the transaction, as the errors they are: the same-handle fence
+# refuses a second use of the handle at bind, which under DuckDB's default policy aborts the DuckDB
+# transaction.
+statement ok
+BEGIN;
+
+statement error
+SELECT * FROM redshift_query('rs', 'rows=1') a, redshift_query('rs', 'rows=1') b;
+----
+Binder Error: redshift_query cannot use attach handle "rs" more than once in the same DuckDB statement.
+
+statement error
+SELECT 1;
+----
+Current transaction is aborted
+
+statement ok
+ROLLBACK;
+
+# A Redshift statement failure is an executor error, which aborts the DuckDB transaction even under
+# SYNTACTIC_ERRORS_DO_NOT_INVALIDATE, so COMMIT keeps nothing.
+statement ok
+SET default_transaction_invalidation_policy = 'SYNTACTIC_ERRORS_DO_NOT_INVALIDATE';
+
+statement ok
+BEGIN;
+
+statement ok
+INSERT INTO local VALUES (1);
+
+statement error
+SELECT * FROM redshift_query('rs', 'fail=execute sqlstates=22012');
+----
+Executor Error: redshift mock: the statement failed while it ran
+
+statement error
+SELECT 1;
+----
+Current transaction is aborted
+
+statement ok
+COMMIT;
+
+query I
+SELECT count(*) FROM local;
+----
+0
+
+statement ok
+RESET default_transaction_invalidation_policy;
+
+# ---------------------------------------------------------------------------
+# Still refused, at bind and before any transport call, on a handle the open transaction attached:
+# its rollback would retire the handle and close its Redshift session, and with it any Redshift
+# transaction opened on it. Worded for the transaction's state, as the gate's refusals are.
+# ---------------------------------------------------------------------------
+query I
+SELECT mock_opened();
+----
+2
+
+statement ok
+BEGIN;
+
+statement ok
+ATTACH '' AS rs2 (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+statement error
+SELECT * FROM redshift_query('rs2', 'rows=1');
+----
+Binder Error: redshift_query cannot run on attach handle "rs2" because the open DuckDB transaction attached it, which redshift_allow_query_in_duckdb_transaction does not change: a rollback of the transaction would detach the handle and close its Redshift session, rolling back any Redshift transaction open on it. This error has aborted the DuckDB transaction: under the transaction's invalidation policy, every error does. Run ROLLBACK (COMMIT would also roll it back, without an error), then attach the handle again if a rollback undid its ATTACH, and run redshift_query on the handle once that ATTACH has committed. To keep a DuckDB transaction usable after this refusal, run SET current_transaction_invalidation_policy = 'SYNTACTIC_ERRORS_DO_NOT_INVALIDATE' in it before calling redshift_query; for a transaction BEGIN opens, setting default_transaction_invalidation_policy to that value before BEGIN does the same.
+
+statement ok
+ROLLBACK;
+
+query I
+SELECT count(*) FROM duckdb_databases() WHERE database_name = 'rs2';
+----
+0
+
+# In a transaction an earlier error aborted, any call is refused at bind, before Describe: DuckDB
+# refuses the statement only after binding it. This comes before the attached-handle check.
+query I
+SELECT mock_described();
+----
+10
+
+statement ok
+BEGIN;
+
+statement ok
+ATTACH '' AS rs2 (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+statement error
+SELECT 'not a number'::INTEGER;
+----
+Conversion Error
+
+statement error
+SELECT * FROM redshift_query('rs', 'rows=1');
+----
+Binder Error: redshift_query cannot run in a DuckDB transaction an earlier error aborted, so this call was not described or run on Redshift. Run ROLLBACK (COMMIT would also roll it back, without an error), then run the statement again.
+
+statement error
+SELECT * FROM redshift_query('rs2', 'rows=1');
+----
+Binder Error: redshift_query cannot run in a DuckDB transaction an earlier error aborted, so this call was not described or run on Redshift.
+
+statement ok
+ROLLBACK;
+
+query I
+SELECT mock_described();
+----
+10
+
+# The hedged wording, when the policy leaves the transaction usable. A handle attached before the
+# transaction still runs in it; once the ATTACH commits, the new handle runs in the next one.
+statement ok
+SET default_transaction_invalidation_policy = 'SYNTACTIC_ERRORS_DO_NOT_INVALIDATE';
+
+statement ok
+BEGIN;
+
+statement ok
+ATTACH '' AS rs2 (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+statement ok
+INSERT INTO local VALUES (1);
+
+statement error
+SELECT * FROM redshift_query('rs2', 'rows=1');
+----
+Binder Error: redshift_query cannot run on attach handle "rs2" because the open DuckDB transaction attached it, which redshift_allow_query_in_duckdb_transaction does not change: a rollback of the transaction would detach the handle and close its Redshift session, rolling back any Redshift transaction open on it. Unless DuckDB had already run part of this statement as a separate statement that wrote, as a PIVOT without an IN list does, the DuckDB transaction is still usable. If you are not sure, run SELECT 1: if it fails with "Current transaction is aborted", run ROLLBACK (COMMIT would also roll it back, without an error); otherwise commit or roll back the transaction. Then attach the handle again if a rollback undid its ATTACH, and run redshift_query on the handle once that ATTACH has committed.
+
+query I
+SELECT count(*) FROM redshift_query('rs', 'rows=1');
+----
+1
+
+statement ok
+COMMIT;
+
+query I
+SELECT mock_opened();
+----
+5
+
+statement ok
+BEGIN;
+
+query I
+SELECT count(*) FROM redshift_query('rs2', 'rows=1');
+----
+1
+
+statement ok
+COMMIT;
+
+query II
+SELECT (SELECT count(*) FROM local), mock_opened();
+----
+1	5
+
+statement ok
+RESET default_transaction_invalidation_policy;
+
+# ---------------------------------------------------------------------------
+# A SET is per DuckDB connection, and SET GLOBAL reaches the others. The warning at first use comes
+# once per DuckDB connection, so a connection that never ran the SET gets one too.
+# ---------------------------------------------------------------------------
+statement ok con2
+BEGIN;
+
+statement error con2
+SELECT * FROM redshift_query('rs', 'rows=1');
+----
+Binder Error: redshift_query cannot run while a DuckDB transaction is open because DuckDB COMMIT or ROLLBACK does not control Redshift operations.
+
+statement ok con2
+ROLLBACK;
+
+statement ok
+SET GLOBAL redshift_allow_query_in_duckdb_transaction = true;
+
+query I
+SELECT set_warnings();
+----
+2
+
+statement ok con2
+BEGIN;
+
+query I con2
+SELECT count(*) FROM redshift_query('rs', 'rows=1');
+----
+1
+
+query I con2
+SELECT count(*) FROM redshift_query('rs', 'rows=1');
+----
+1
+
+statement ok con2
+COMMIT;
+
+query I
+SELECT use_warnings();
+----
+2
+
+statement ok
+RESET GLOBAL redshift_allow_query_in_duckdb_transaction;
+
+# ---------------------------------------------------------------------------
+# RESET turns it off, without a warning, and the gate refuses again.
+# ---------------------------------------------------------------------------
+statement ok
+RESET redshift_allow_query_in_duckdb_transaction;
+
+query II
+SELECT current_setting('redshift_allow_query_in_duckdb_transaction'), set_warnings();
+----
+false	2
+
+statement ok
+BEGIN;
+
+statement error
+SELECT * FROM redshift_query('rs', 'rows=1');
+----
+Binder Error: redshift_query cannot run while a DuckDB transaction is open because DuckDB COMMIT or ROLLBACK does not control Redshift operations.
+
+statement ok
+ROLLBACK;
+
+# ---------------------------------------------------------------------------
+# A session RESET drops this DuckDB connection's own value, so a later SET GLOBAL reaches it too, until
+# RESET GLOBAL ends the SET GLOBAL.
+# ---------------------------------------------------------------------------
+statement ok con2
+SET GLOBAL redshift_allow_query_in_duckdb_transaction = true;
+
+query I
+SELECT current_setting('redshift_allow_query_in_duckdb_transaction');
+----
+true
+
+query I con2
+SELECT current_setting('redshift_allow_query_in_duckdb_transaction');
+----
+true
+
+statement ok con2
+RESET GLOBAL redshift_allow_query_in_duckdb_transaction;
+
+query I con2
+SELECT current_setting('redshift_allow_query_in_duckdb_transaction');
+----
+false
+
+query I
+SELECT current_setting('redshift_allow_query_in_duckdb_transaction');
+----
+false

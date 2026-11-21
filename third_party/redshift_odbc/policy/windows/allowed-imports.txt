@@ -1,0 +1,73 @@
+# The DLLs each file of the Windows set may import by name: a set member, a system DLL or a VC++
+# run-time DLL that policy/host-prerequisites.txt lists. Each file's rows must equal the DLL names
+# of its import descriptors, its delay imports, which the delay helper loads by name, and the DLLs
+# outside the set its forwarders name, which the loader loads with .dll added, ignoring case, so an
+# added or a dropped import fails verification until a reviewed edit here. One row per file and DLL:
+# <file> <dll>. python3 -I tools/lib/windows_policy.py rows <set-dir> <driver> policy
+# allowed-imports prints the rows for a set, from the files verification takes out of the locked
+# MSI.
+comerr64.dll  k5sprt64.dll
+comerr64.dll  KERNEL32.dll
+comerr64.dll  MSVCR100.dll
+comerr64.dll  USER32.dll
+crypto.dll  KERNEL32.dll
+crypto.dll  WS2_32.dll
+gssapi64.dll  ADVAPI32.dll
+gssapi64.dll  comerr64.dll
+gssapi64.dll  k5sprt64.dll
+gssapi64.dll  KERNEL32.dll
+gssapi64.dll  krb5_64.dll
+gssapi64.dll  MSVCR100.dll
+k5sprt64.dll  KERNEL32.dll
+k5sprt64.dll  MSVCR100.dll
+k5sprt64.dll  WS2_32.dll
+krb5_64.dll  ADVAPI32.dll
+krb5_64.dll  comerr64.dll
+krb5_64.dll  GDI32.dll
+krb5_64.dll  k5sprt64.dll
+krb5_64.dll  KERNEL32.dll
+krb5_64.dll  MSVCR100.dll
+krb5_64.dll  Secur32.dll
+krb5_64.dll  SHELL32.dll
+krb5_64.dll  USER32.dll
+krb5_64.dll  WS2_32.dll
+krb5_64.dll  WSHELP64.dll
+msvcr100.dll  KERNEL32.dll
+rsodbc.dll  ADVAPI32.dll
+rsodbc.dll  api-ms-win-crt-convert-l1-1-0.dll
+rsodbc.dll  api-ms-win-crt-environment-l1-1-0.dll
+rsodbc.dll  api-ms-win-crt-filesystem-l1-1-0.dll
+rsodbc.dll  api-ms-win-crt-heap-l1-1-0.dll
+rsodbc.dll  api-ms-win-crt-locale-l1-1-0.dll
+rsodbc.dll  api-ms-win-crt-math-l1-1-0.dll
+rsodbc.dll  api-ms-win-crt-runtime-l1-1-0.dll
+rsodbc.dll  api-ms-win-crt-stdio-l1-1-0.dll
+rsodbc.dll  api-ms-win-crt-string-l1-1-0.dll
+rsodbc.dll  api-ms-win-crt-time-l1-1-0.dll
+rsodbc.dll  api-ms-win-crt-utility-l1-1-0.dll
+rsodbc.dll  CRYPT32.dll
+rsodbc.dll  crypto.dll
+rsodbc.dll  gssapi64.dll
+rsodbc.dll  IPHLPAPI.DLL
+rsodbc.dll  KERNEL32.dll
+rsodbc.dll  ncrypt.dll
+rsodbc.dll  Secur32.dll
+rsodbc.dll  SHELL32.dll
+rsodbc.dll  ssl.dll
+rsodbc.dll  USER32.dll
+rsodbc.dll  USERENV.dll
+rsodbc.dll  VCRUNTIME140.dll
+rsodbc.dll  VCRUNTIME140_1.dll
+rsodbc.dll  VERSION.dll
+rsodbc.dll  WINHTTP.dll
+rsodbc.dll  WININET.dll
+rsodbc.dll  WLDAP32.dll
+rsodbc.dll  WS2_32.dll
+ssl.dll  crypto.dll
+ssl.dll  KERNEL32.dll
+wshelp64.dll  ADVAPI32.dll
+wshelp64.dll  DNSAPI.dll
+wshelp64.dll  KERNEL32.dll
+wshelp64.dll  MSVCR100.dll
+wshelp64.dll  USER32.dll
+wshelp64.dll  WS2_32.dll

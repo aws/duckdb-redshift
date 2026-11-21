@@ -1,0 +1,150 @@
+# name: test/client/sql/session_setup.test
+# description: live: a new connection keeps no other session's settings and runs the setup, so floats arrive bit-exact
+# group: [sql]
+
+require-env REDSHIFT_TEST_CLIENT odbc
+
+# Live only (test/README.md, "Live variables"): it needs REDSHIFT_TEST_LIVE_REGION and a build with
+# the embedded driver.
+require-env REDSHIFT_TEST_LIVE_REGION
+
+# The account-backed workgroup the live tests reach (test/README.md, "Live variables").
+require-env REDSHIFT_TEST_LIVE_WORKGROUP
+
+require-env REDSHIFT_TEST_LIVE_ACCOUNT_ID
+
+require redshift
+
+statement ok
+ATTACH '' AS rs (TYPE redshift, REGION '{REDSHIFT_TEST_LIVE_REGION}', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP '{REDSHIFT_TEST_LIVE_WORKGROUP}', ACCOUNT_ID '{REDSHIFT_TEST_LIVE_ACCOUNT_ID}');
+
+# A read-only run cannot give the user other defaults, so the first session sets other values and the
+# second, a new connection, reports the setup's. The server's defaults are already UTC, ISO, MDY and
+# postgres, so of the values only extra_float_digits shows the setup; pg_settings' source shows the
+# date and interval style statements ran too, and sys_query_history the time zone one.
+# session_setup_test.cpp pins all four statements.
+statement ok
+SELECT * FROM redshift_query('rs', 'SET timezone TO ''America/New_York''');
+
+statement ok
+SELECT * FROM redshift_query('rs', 'SET datestyle TO ''SQL, DMY''');
+
+statement ok
+SELECT * FROM redshift_query('rs', 'SET extra_float_digits TO 0');
+
+statement ok
+SELECT * FROM redshift_query('rs', 'SET intervalstyle TO ''postgres_verbose''');
+
+# The positive control: the first session keeps its values, and with no extra digits the double
+# arrives rounded to 0.3, so the second session's exact value is the setup's doing.
+query T
+SELECT * FROM redshift_query('rs', 'SHOW timezone');
+----
+America/New_York
+
+query T
+SELECT * FROM redshift_query('rs', 'SHOW datestyle');
+----
+SQL, DMY
+
+query T
+SELECT a = 0.3::DOUBLE FROM redshift_query('rs', 'SELECT 0.30000000000000004::float8 AS a');
+----
+true
+
+# The control for the history check below: this session's history holds both of its time zone
+# statements, the setup's and the first SET above, in order. A process id can be an older, ended
+# session's too, so only statements since that session's end count.
+query T
+SELECT * FROM redshift_query('rs', 'SELECT CAST(TRIM(query_text) AS VARCHAR(64)) AS q FROM sys_query_history WHERE session_id = pg_backend_pid() AND query_text LIKE ''SET timezone%'' AND start_time > COALESCE((SELECT MAX(end_time) FROM sys_session_history WHERE session_id = pg_backend_pid()), CAST(''1900-01-01'' AS TIMESTAMP)) ORDER BY start_time');
+----
+SET timezone TO 'UTC'
+SET timezone TO 'America/New_York'
+
+# Another interval style prints the same intervals in other words, without an error.
+query TT
+SELECT * FROM redshift_query('rs', 'SELECT INTERVAL ''1 day 2 hours'' AS a, CAST(INTERVAL ''-3 04:05:06.789012'' DAY TO SECOND AS VARCHAR(64)) AS b');
+----
+@ 1 day 2 hours	@ 2 days 19 hours 54 mins 53.-21 secs ago
+
+query T con2
+SELECT * FROM redshift_query('rs', 'SHOW timezone');
+----
+UTC
+
+query T con2
+SELECT * FROM redshift_query('rs', 'SHOW datestyle');
+----
+ISO, MDY
+
+query T con2
+SELECT * FROM redshift_query('rs', 'SHOW extra_float_digits');
+----
+2
+
+query T con2
+SELECT * FROM redshift_query('rs', 'SHOW intervalstyle');
+----
+postgres
+
+# A SET in the session makes a setting's source session, which tells the setup's value from an equal
+# default. This workgroup's pg_settings has no time zone row under any case of the name, so the
+# history check below tells the time zone statement ran.
+query TTT con2
+SELECT * FROM redshift_query('rs', 'SELECT name, setting, source FROM pg_settings WHERE name IN (''datestyle'', ''extra_float_digits'', ''intervalstyle'') ORDER BY name');
+----
+datestyle	ISO, MDY	session
+extra_float_digits	2	session
+intervalstyle	postgres	session
+
+# The setup's four statements are the new session's first, in order, each a success, so the time
+# zone one ran though the server's default is UTC too. As in the control, statements of an older
+# session with the same process id do not count.
+query TT con2
+SELECT * FROM redshift_query('rs', 'SELECT CAST(TRIM(query_text) AS VARCHAR(64)) AS q, CAST(TRIM(status) AS VARCHAR(16)) AS s FROM sys_query_history WHERE session_id = pg_backend_pid() AND start_time > COALESCE((SELECT MAX(end_time) FROM sys_session_history WHERE session_id = pg_backend_pid()), CAST(''1900-01-01'' AS TIMESTAMP)) ORDER BY start_time LIMIT 4');
+----
+SET extra_float_digits TO 2	success
+SET timezone TO 'UTC'	success
+SET datestyle TO 'ISO, MDY'	success
+SET intervalstyle TO 'postgres'	success
+
+# The postgres style. A DAY TO SECOND column has no carrier, so the query casts it to text on the
+# server, which prints the sign on both parts.
+query TT con2
+SELECT * FROM redshift_query('rs', 'SELECT INTERVAL ''1 day 2 hours'' AS a, CAST(INTERVAL ''-3 04:05:06.789012'' DAY TO SECOND AS VARCHAR(64)) AS b');
+----
+1 day 02:00:00	-2 days -19:54:53.210988
+
+# Both doubles arrive bit-exact, the largest finite one too.
+query TT con2
+SELECT a = 0.30000000000000004::DOUBLE, b = 1.7976931348623157e308::DOUBLE FROM redshift_query('rs', 'SELECT 0.30000000000000004::float8 AS a, 1.7976931348623157e308::float8 AS b');
+----
+true	true
+
+# A TIMESTAMPTZ from before New York's standard time prints with the offset +00, so its instant is
+# whole; the first session's zone would print it as 07:03:58-04:56, two seconds early.
+query T con2
+SELECT * FROM redshift_query('rs', 'SELECT CAST(CAST(''1883-11-18 12:00:00+00'' AS TIMESTAMPTZ) AS VARCHAR(64)) AS t');
+----
+1883-11-18 12:00:00+00
+
+statement ok
+SELECT * FROM redshift_query('rs', 'RESET timezone');
+
+statement ok
+SELECT * FROM redshift_query('rs', 'RESET datestyle');
+
+statement ok
+SELECT * FROM redshift_query('rs', 'RESET extra_float_digits');
+
+statement ok
+SELECT * FROM redshift_query('rs', 'RESET intervalstyle');
+
+# The control: after the first session's RESETs the source is the workgroup's or the server's
+# (configuration file or default), not session.
+query TT
+SELECT * FROM redshift_query('rs', 'SELECT name, source = ''session'' AS from_set FROM pg_settings WHERE name IN (''datestyle'', ''extra_float_digits'', ''intervalstyle'') ORDER BY name');
+----
+datestyle	false
+extra_float_digits	false
+intervalstyle	false

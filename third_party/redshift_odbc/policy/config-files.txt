@@ -1,0 +1,111 @@
+# Configuration files the driver and its bundled libraries can read, and the environment variables
+# that name or move them. From the file names the 2.3.0.0 and 2.3.1.0 drivers hold, on both architectures. The
+# loader writes only the driver set into the private directory, never one of these files.
+# driver_config_files_test.cpp traces the load and the closed-port smoke on every make test_driver
+# where the driver can load and ptrace, with PTRACE_GETREGSET, is allowed; elsewhere it warns and
+# stops, or fails with REDSHIFT_TEST_REQUIRE_HOST_LIBRARIES=1. It fails when the driver opens or
+# probes a configuration path no row lists. Reviewed for 2.3.0.0, and again on every driver update;
+# for 2.3.1.0 the trace finds no new file, beside the CA-file lookup below the root.crt rows, and
+# its c-ares names /etc/netsvc.conf in place of /etc/host.conf.
+#
+# One file per line: where the driver looks by default, its kind, the variables that override or
+# move it (comma-separated, or - for none), and what it configures. The kind is `ini` for an INI
+# file the driver reads its settings and logging from (the files environment_gate_test.cpp enables
+# logging through), and `other` for every other file. A location is an absolute path, ~/ (under
+# HOME), ./ (the current directory), <driver-dir>/ (the directory the driver is loaded from,
+# /proc/thread-self/fd for the loader's load by descriptor) or <$NAME> (the path a variable names);
+# one ending in / is a directory and everything in it. `*`, %{...} and %lu match any text.
+# <kerberos-prefix>/ is the directory the bundled Kerberos libraries were built for, which the
+# driver holds; driver_config_files_test.cpp reads it from the driver.
+#
+# A location holding a backslash is a Windows row, which the Linux and macOS trace leaves out. It
+# starts with %NAME%\ (the folder a Windows variable names, read through its known folder),
+# <driver-dir>\, a drive letter, \ (the root of the current drive), or HKLM\ or HKCU\ for a registry
+# key in the 64-bit view, whose kind is `key` and which covers its subkeys and values; %20 is a
+# space. The <$NAME> rows hold on Windows too. A phase in a Windows row's text is unverified until
+# the Windows file trace shows it.
+#
+# location                                           kind   overridden by                    configures
+<driver-dir>/amazon.redshiftodbc.ini                 ini    -                                driver settings, including logging
+./odbc.ini                                           ini    ODBCINI                          ODBC data sources and driver logging; never read: every environment handle is allocated with ODBCINI=/dev/null
+~/.pgpass                                            other  PGPASSFILE                       passwords
+/usr/local/pgsql/etc/pg_service.conf                 other  PGSYSCONFDIR                     connection services, system file (the variable names its directory)
+~/.pg_service.conf                                   other  PGSERVICEFILE                    connection services, user file
+~/.redshift/root.crt                                 other  PGSSLROOTCERT                    TLS trust
+<driver-dir>/root.crt                                other  -                                TLS trust, beside a named CA file whenever the connection validates (2.3.1.0); never in the private directory
+# Driver 2.3.1.0 also looks for the user's default root.crt under the account's home from the
+# password database, not HOME, reading /etc/passwd and /etc/nsswitch.conf to find it, when a
+# connection names no CA file (rslibpq.c findCaFile). The ODBC client always names one (CaFile
+# beside TrustStore), so the extension never reaches that lookup, and the trace's smoke names one too.
+~/.redshift/redshift.crt                             other  PGSSLCERT                        TLS client certificate
+~/.redshift/redshift.key                             other  PGSSLKEY                         TLS client key
+~/.redshiftroot.crl                                  other  PGSSLCRL                         TLS certificate revocation list; the driver's own default, with no slash after .redshift
+~/.aws/config                                        other  AWS_CONFIG_FILE                  AWS profiles of the default credential chain
+~/.aws/credentials                                   other  AWS_SHARED_CREDENTIALS_FILE      AWS credentials of the default credential chain
+~/.aws/login/cache/                                  other  AWS_LOGIN_CACHE_DIRECTORY        cached AWS sign-in tokens
+<$AWS_WEB_IDENTITY_TOKEN_FILE>                       other  AWS_WEB_IDENTITY_TOKEN_FILE      web identity token of the default credential chain
+<$AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE>            other  AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE  container credential token
+/etc/krb5.conf                                       other  KRB5_CONFIG                      Kerberos
+<kerberos-prefix>/etc/krb5.conf                      other  KRB5_CONFIG                      Kerberos, also read by default
+<kerberos-prefix>/var/krb5kdc/kdc.conf               other  KRB5_KDC_PROFILE                 Kerberos KDC settings
+/etc/krb5.keytab                                     other  KRB5_KTNAME                      Kerberos keytab
+<kerberos-prefix>/var/krb5/user/%{euid}/client.keytab other KRB5_CLIENT_KTNAME               Kerberos client keytab
+<$KRB5CCNAME>                                        other  KRB5CCNAME                       Kerberos credential cache
+/tmp/krb5cc_%{uid}                                   other  KRB5CCNAME                       Kerberos credential cache, by default
+~/.k5identity                                        other  -                                Kerberos credential cache selection
+<$KRB5RCACHEDIR>/krb5_%lu.rcache2                    other  KRB5RCACHEDIR,KRB5RCACHENAME,KRB5RCACHETYPE  Kerberos replay cache
+/var/tmp/krb5_%lu.rcache2                            other  KRB5RCACHEDIR,KRB5RCACHENAME,KRB5RCACHETYPE  Kerberos replay cache, by default
+<kerberos-prefix>/lib/krb5/plugins/                  other  -                                Kerberos plugins
+<kerberos-prefix>/etc/gss/mech                       other  GSS_MECH_CONFIG                  GSS mechanism configuration
+<kerberos-prefix>/etc/gss/mech.d/                    other  GSS_MECH_CONFIG                  GSS mechanism configuration
+<kerberos-prefix>/lib/gss/                           other  GSS_MECH_CONFIG                  GSS mechanisms
+~/.netrc                                             other  NETRC                            HTTP credentials for curl
+/etc/pki/tls/certs/ca-bundle.crt                     other  SSL_CERT_FILE                    TLS trust, when the connection names none
+/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem    other  SSL_CERT_FILE                    TLS trust, when the connection names none
+/etc/pki/tls/cacert.pem                              other  SSL_CERT_FILE                    TLS trust, when the connection names none
+/etc/ssl/ca-bundle.pem                               other  SSL_CERT_FILE                    TLS trust, when the connection names none
+/etc/ssl/cert.pem                                    other  SSL_CERT_FILE                    TLS trust, when the connection names none
+/etc/ssl/certs/ca-certificates.crt                   other  SSL_CERT_FILE                    TLS trust, when the connection names none
+/etc/ssl/certs/                                      other  SSL_CERT_DIR                     TLS trust, when the connection names none
+/etc/pki/tls/certs/                                  other  -                                TLS trust of the bundled AWS SDK, when none is given
+/etc/openssl/certs/                                  other  -                                TLS trust of the bundled AWS SDK, when none is given
+/usr/local/share/certs/                              other  -                                TLS trust of the bundled AWS SDK, when none is given
+/system/etc/security/cacerts/                        other  -                                TLS trust of the bundled AWS SDK, when none is given
+/etc/resolv.conf                                     other  LOCALDOMAIN,RES_OPTIONS          name resolution, by glibc and the bundled c-ares
+/etc/hosts                                           other  CARES_HOSTS,HOSTALIASES          name resolution; CARES_HOSTS moves the file and HOSTALIASES names an alias file
+/etc/host.conf                                       other  -                                name resolution, by glibc (the bundled c-ares read it before 1.34)
+/etc/netsvc.conf                                     other  -                                name resolution (lookup order), by the bundled c-ares 1.34 on Linux
+/etc/nsswitch.conf                                   other  -                                name resolution, by glibc and the bundled c-ares
+/etc/svc.conf                                        other  -                                name resolution, by glibc and the bundled c-ares
+
+# Windows. libpq's per-user files are under %APPDATA%\redshift, the driver's form of libpq's
+# %APPDATA%\postgresql, with the ~/.redshift rows' decision; no variable refusal covers them.
+%APPDATA%\redshift\root.crt                          other  PGSSLROOTCERT                    TLS trust, only when the connection names none (TrustStore always does)
+%APPDATA%\redshift\root.crl                          other  PGSSLCRL                         TLS certificate revocation list, applied when present
+%APPDATA%\redshift\redshift.crt                      other  PGSSLCERT                        TLS client certificate, presented when present
+%APPDATA%\redshift\redshift.key                      other  PGSSLKEY                         TLS client key
+%APPDATA%\redshift\pgpass.conf                       other  PGPASSFILE                       passwords
+%APPDATA%\redshift\.pg_service.conf                  other  PGSERVICEFILE                    connection services, user file
+\usr\local\pgsql\etc\pg_service.conf                 other  PGSYSCONFDIR                     connection services, system file (the variable names its directory); on the current drive, where a normal user can create \usr; read only for a named service
+<driver-dir>\amazon.redshiftodbc.ini                 ini    -                                driver settings, including logging, read by DllMain at load when the registry's LogLevel is off; never in the private directory
+HKLM\SOFTWARE\Amazon\Amazon%20Redshift%20ODBC%20Driver%20(x64)\Driver\ key -                     the installed driver's LogLevel, LogPath and Trace values, read by DllMain at load; the loader refuses a value that turns logging on
+HKLM\SOFTWARE\ODBC\ODBC.INI\                         key    -                                ODBC data sources, read through odbccp32.dll only for a DSN, which the connection string never names
+HKCU\Software\ODBC\ODBC.INI\                         key    -                                ODBC data sources, read through odbccp32.dll only for a DSN, which the connection string never names
+<driver-dir>\root.crt                                other  -                                TLS trust, beside a named CA file whenever the connection validates (2.3.1.0); never in the private directory
+%USERPROFILE%\.aws\config                            other  AWS_CONFIG_FILE                  AWS profiles of the default credential chain
+%USERPROFILE%\.aws\credentials                       other  AWS_SHARED_CREDENTIALS_FILE      AWS credentials of the default credential chain
+%USERPROFILE%\.aws\login\cache\                      other  AWS_LOGIN_CACHE_DIRECTORY        cached AWS sign-in tokens
+# Kerberos for Windows 4.0.1, the inputs its DLLs name: krb5_64.dll finds krb5.ini beside itself by
+# its self-name, then in the common application-data folder and the Windows directory. The ODBC
+# client refuses the GSS path, the only one expected to reach these.
+<driver-dir>\krb5.ini                                other  KRB5_CONFIG                      Kerberos; the set ships none
+%ProgramData%\MIT\Kerberos5\krb5.ini                 other  KRB5_CONFIG                      Kerberos; GSS path, at connect
+%SystemRoot%\krb5.ini                                other  KRB5_CONFIG                      Kerberos; GSS path, at connect
+%SystemRoot%\kerberos.ini                            other  -                                Kerberos for Windows settings, read with GetPrivateProfileStringA; GSS path, at connect
+HKLM\SOFTWARE\MIT\Kerberos5\                         key    -                                Kerberos: the config and ccname values; GSS path, at connect
+HKCU\Software\MIT\Kerberos5\                         key    -                                Kerberos: the config and ccname values; GSS path, at connect
+C:\net\tcp\hesiod.cfg                                other  -                                Hesiod name service, by wshelp64.dll; a normal user can create it; GSS path, at connect
+C:\net\tcp\resolv.cfg                                other  -                                name resolution, by wshelp64.dll; a normal user can create it; GSS path, at connect
+HKLM\Software\MIT\WsHelper\                          key    -                                wshelp64.dll's settings; GSS path, at connect
+HKCU\Software\MIT\WsHelper\                          key    -                                wshelp64.dll's settings; GSS path, at connect
+HKLM\SOFTWARE\gss\mech\                              key    -                                GSS mechanism DLLs, which gssapi64.dll loads; GSS path, at connect

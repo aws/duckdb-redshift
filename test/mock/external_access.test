@@ -1,0 +1,86 @@
+# name: test/mock/external_access.test
+# description: with external access turned off at run time, no new Redshift handle is attached, and one attached before stays usable
+# group: [mock]
+
+require-env REDSHIFT_TEST_CLIENT mock
+
+require redshift
+
+statement ok
+CALL enable_logging(level = 'debug');
+
+statement ok
+CREATE MACRO mock_opened() AS (SELECT count(*) FROM duckdb_logs WHERE message LIKE 'redshift mock: opened a connection to %');
+
+statement ok
+ATTACH '' AS before_set (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+
+statement ok
+SET enable_external_access = false;
+
+# Refused before any open.
+statement error
+ATTACH '' AS after_set (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+----
+Permission Error: Cannot attach after_set: the host disallows external access (enable_external_access is false), so no new Redshift handle can be attached. Handles attached before it was disabled keep working.
+
+statement error
+ATTACH OR REPLACE '' AS before_set (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901');
+----
+Permission Error: Cannot attach before_set: the host disallows external access
+
+# Before any option is read: an unknown option and a missing secret, each refused by its own error
+# with external access on (attach.test), get this one instead.
+statement error
+ATTACH '' AS bogus_option (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'test-wg', ACCOUNT_ID '012345678901', BOGUS 1);
+----
+Permission Error: Cannot attach bogus_option: the host disallows external access
+
+statement error
+ATTACH '' AS missing_secret (TYPE redshift, SECRET no_such_secret);
+----
+Permission Error: Cannot attach missing_secret: the host disallows external access
+
+# Before the handle name and the path, too: an ATTACH without AS, and one with a non-empty path.
+statement error
+ATTACH '' (TYPE redshift, SECRET no_such_secret);
+----
+Permission Error: Cannot attach memory: the host disallows external access
+
+statement error
+ATTACH 'x.duckdb' AS with_path (TYPE redshift, SECRET no_such_secret);
+----
+Permission Error: Cannot attach with_path: the host disallows external access
+
+# A path without AS: the handle is named after the path, which the refusal does not repeat.
+statement error
+ATTACH 'redshift://admin:Secr3t@wg1.012345678901.us-east-1.redshift-serverless.amazonaws.com' (TYPE redshift, SECRET no_such_secret);
+----
+Permission Error: Cannot attach the handle named after its path (give it an AS name other than the path's to see it here): the host disallows external access
+
+statement error
+ATTACH 'redshift://admin:Secr3t@wg1.012345678901.us-east-1.redshift-serverless.amazonaws.com' (TYPE redshift, SECRET no_such_secret);
+----
+<!REGEX>:.*(Secr3t|admin|012345678901).*
+
+query I
+SELECT mock_opened();
+----
+1
+
+# The handle attached before the SET still runs, on this DuckDB connection's session, which its
+# ATTACH opened, and opens a session on another.
+query I
+SELECT count(*) FROM redshift_query('before_set', 'rows=2');
+----
+2
+
+query I con2
+SELECT count(*) FROM redshift_query('before_set', 'rows=3');
+----
+3
+
+query I
+SELECT mock_opened();
+----
+2

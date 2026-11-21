@@ -1,0 +1,448 @@
+# name: test/mock/attach_path.test
+# description: ATTACH by a redshift:// endpoint, a workgroup endpoint's long-form ARN or a cluster identifier, with the options ignored beside any form, end to end against the mock client
+# group: [mock]
+
+require-env REDSHIFT_TEST_CLIENT mock
+
+require redshift
+
+# A cluster identifier path given neither SECRET nor CREDENTIAL_PROVIDER takes the only aws or s3
+# secret in any storage, so persistent secrets in this machine's home directory are kept out.
+statement ok
+SET allow_persistent_secrets = false;
+
+# Logged from the start: each ATTACH below opens its session.
+statement ok
+CALL enable_logging(level = 'debug');
+
+# A workgroup with its account, a workgroup endpoint with no account, a cluster, and the long ARN.
+statement ok
+ATTACH 'redshift://wg1.012345678901.us-east-1.redshift-serverless.amazonaws.com/dev' AS rs_wg (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain);
+
+statement ok
+ATTACH 'redshift://wg-a.lbl.us-east-1.redshift-serverless.amazonaws.com' AS rs_label (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain);
+
+statement ok
+ATTACH 'redshift://my-cluster.abc123xyz.us-east-1.redshift.amazonaws.com:5440/analytics' AS rs_cluster (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain);
+
+statement ok
+ATTACH 'arn:aws:redshift-serverless:eu-north-1:012345678901:workgroup/lbl/wg-a' AS rs_arn (TYPE redshift, CREDENTIAL_PROVIDER aws_default_chain);
+
+# Each is an attached Redshift handle, whose path column is empty: the path only named the target.
+query III
+SELECT database_name, path, type FROM duckdb_databases() WHERE type = 'redshift' ORDER BY database_name;
+----
+rs_arn	(empty)	redshift
+rs_cluster	(empty)	redshift
+rs_label	(empty)	redshift
+rs_wg	(empty)	redshift
+
+# A handle attached by a path connects like any other, at its ATTACH, to the target its path names: a
+# cluster's to its endpoint's label and port.
+
+query I
+SELECT c0 FROM redshift_query('rs_label', 'rows=1 types=int8');
+----
+0
+
+query I
+SELECT c0 FROM redshift_query('rs_arn', 'rows=1 types=int8');
+----
+0
+
+statement ok
+SELECT * FROM redshift_query('rs_cluster', 'rows=1 cols=1');
+
+statement ok
+SELECT * FROM redshift_query('rs_wg', 'rows=1 cols=1');
+
+query IIII
+SELECT bool_or(message = 'redshift mock: opened a connection to region us-east-1, workgroup wg-a, endpoint label lbl'),
+       bool_or(message = 'redshift mock: opened a connection to region eu-north-1, workgroup wg-a, endpoint label lbl'),
+       bool_or(message = 'redshift mock: opened a connection to region us-east-1, cluster my-cluster, endpoint label abc123xyz, port 5440, database analytics'),
+       bool_or(message = 'redshift mock: opened a connection to region us-east-1, workgroup wg1, account 012345678901, database dev')
+FROM duckdb_logs WHERE log_level = 'DEBUG';
+----
+true	true	true	true
+
+# The path names the target, so target options beside it are refused, and so is another region.
+statement error
+ATTACH 'arn:aws:redshift-serverless:eu-north-1:012345678901:workgroup/lbl/wg-a' AS rs_bad (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, WORKGROUP 'other');
+----
+Cannot attach rs_bad: the path names the target, so WORKGROUP, ACCOUNT_ID and CLUSTER cannot be given too
+
+statement error
+ATTACH 'arn:aws:redshift-serverless:eu-north-1:012345678901:workgroup/lbl/wg-a' AS rs_bad (TYPE redshift, CREDENTIAL_PROVIDER aws_default_chain, REGION 'us-east-1');
+----
+Cannot attach rs_bad: REGION names another region than the path; give one, or make them agree
+
+# A workgroup ARN by ID needs an AWS lookup, which this extension does not make: it is told to name
+# the workgroup, never to go to the aws extension, which hands every Redshift ATTACH to this one.
+statement error
+ATTACH 'arn:aws:redshift-serverless:us-east-1:012345678901:workgroup/0b1c2d3e-4f5a-6b7c-8d9e-0f1a2b3c4d5e' AS rs_bad (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain);
+----
+Cannot attach rs_bad: The path is a Serverless workgroup ARN, which names its target by ID, and finding the target it means needs an AWS lookup that this extension does not make. Give the workgroup's name with its account
+
+statement error
+ATTACH 'redshift://wg1.012345678901.us-east-1.redshift-serverless.example.com' AS rs_bad (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain);
+----
+Cannot attach rs_bad: The path is not a Redshift endpoint.
+
+# A failed ATTACH attaches nothing.
+query I
+SELECT count(*) FROM duckdb_databases() WHERE database_name = 'rs_bad';
+----
+0
+
+# Without AS, a path's handle takes the name DuckDB derives before the extension runs: the path's
+# last `/` segment up to its first `.`, so the database for a URI that names one and the workgroup
+# or cluster otherwise, with _db after a reserved name.
+statement ok
+ATTACH 'redshift://wg1.012345678901.us-east-1.redshift-serverless.amazonaws.com/dev' (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain);
+
+statement ok
+ATTACH 'redshift://wg-a.lbl.us-east-1.redshift-serverless.amazonaws.com' (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain);
+
+statement ok
+ATTACH 'arn:aws:redshift-serverless:us-east-1:012345678901:workgroup/lbl/wg-b' (TYPE redshift, CREDENTIAL_PROVIDER aws_default_chain);
+
+statement ok
+ATTACH 'redshift://my-cluster.abc123xyz.us-east-1.redshift.amazonaws.com:5439/main' (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain);
+
+query II
+SELECT database_name, type FROM duckdb_databases() WHERE database_name IN ('dev', 'wg-a', 'wg-b', 'main_db') ORDER BY database_name;
+----
+dev	redshift
+main_db	redshift
+wg-a	redshift
+wg-b	redshift
+
+# A second path with the same derived name is DuckDB's conflict, and the first handle stays.
+statement error
+ATTACH 'redshift://wg2.012345678901.us-east-1.redshift-serverless.amazonaws.com/dev' (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain);
+----
+<REGEX>:.*database with name "?dev"? already exists.*
+
+# A refusal does not repeat a derived name, which may hold anything from the path: user information,
+# or a cluster ARN's account. It says an AS name would be shown. Each case runs
+# twice: once for the message, once to show the path's parts are absent from it.
+statement error
+ATTACH 'redshift://admin:Secr3t@wg1.012345678901.us-east-1.redshift-serverless.amazonaws.com' (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain);
+----
+Cannot attach the handle named after its path (give it an AS name other than the path's to see it here): The path holds user information ('@')
+
+statement error
+ATTACH 'redshift://admin:Secr3t@wg1.012345678901.us-east-1.redshift-serverless.amazonaws.com' (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain);
+----
+<!REGEX>:.*(Secr3t|admin|012345678901).*
+
+statement error
+ATTACH 'arn:aws:redshift:us-east-1:012345678901:cluster:my-cluster' (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain);
+----
+Cannot attach the handle named after its path (give it an AS name other than the path's to see it here): The path is a cluster ARN.
+
+statement error
+ATTACH 'arn:aws:redshift:us-east-1:012345678901:cluster:my-cluster' (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain);
+----
+<!REGEX>:.*(012345678901|my-cluster).*
+
+# The examples in a refusal of another path name no handle either.
+statement error
+ATTACH 'postgresql://user:pw@host.example.com' (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain);
+----
+Cannot attach the handle named after its path (give it an AS name other than the path's to see it here): the path must be empty, a redshift:// endpoint or a workgroup endpoint's ARN. Give the configuration as options: ATTACH '' AS <handle> (TYPE redshift, REGION '<region>', ...), or the endpoint: ATTACH 'redshift://<endpoint>[:<port>][/<database>]' AS <handle> (TYPE redshift, ...)
+
+statement error
+ATTACH 'postgresql://user:pw@host.example.com' (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain);
+----
+<!REGEX>:.*pw@host.*
+
+# An option refused before the path is read does not name the derived handle either.
+statement error
+ATTACH 'redshift://admin:Secr3t@wg1.012345678901.us-east-1.redshift-serverless.amazonaws.com' (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, HOSTNAME 'x');
+----
+Cannot attach the handle named after its path (give it an AS name other than the path's to see it here): Invalid ATTACH option 'HOSTNAME'
+
+statement error
+ATTACH 'redshift://admin:Secr3t@wg1.012345678901.us-east-1.redshift-serverless.amazonaws.com' (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, HOSTNAME 'x');
+----
+<!REGEX>:.*Secr3t.*
+
+# Nor do the refusals of SECRET's type, an option's value, or a read-only option, which come before
+# the path is read.
+statement error
+ATTACH 'redshift://admin:Secr3t@wg1.012345678901.us-east-1.redshift-serverless.amazonaws.com' (TYPE redshift, SECRET 1);
+----
+Cannot attach the handle named after its path (give it an AS name other than the path's to see it here): Invalid value for parameter 'SECRET'
+
+statement error
+ATTACH 'redshift://admin:Secr3t@wg1.012345678901.us-east-1.redshift-serverless.amazonaws.com' (TYPE redshift, CREDENTIAL_PROVIDER aws_default_chain, REGION 1);
+----
+Cannot attach the handle named after its path (give it an AS name other than the path's to see it here): Invalid value for parameter 'REGION'
+
+statement error
+ATTACH 'redshift://admin:Secr3t@wg1.012345678901.us-east-1.redshift-serverless.amazonaws.com' (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, READ_ONLY);
+----
+Cannot attach the handle named after its path (give it an AS name other than the path's to see it here): Invalid value true for ATTACH option 'READ_ONLY'
+
+# An AS that repeats the derived name, in any letter case, is not repeated either.
+statement error
+ATTACH 'redshift://wg1.012345678901.us-east-1.redshift-serverless.amazonaws.com/dev2' AS DEV2 (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, HOSTNAME 'x');
+----
+Cannot attach the handle named after its path (give it an AS name other than the path's to see it here): Invalid ATTACH option 'HOSTNAME'
+
+# With another AS, the refusal names the handle.
+statement error
+ATTACH 'arn:aws:redshift:us-east-1:012345678901:cluster:my-cluster' AS rs_bad (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain);
+----
+Cannot attach rs_bad: The path is a cluster ARN.
+
+# A path whose derived name is memory is refused, as the empty path without AS is. The remedy keeps
+# the path's place with a placeholder, not the empty path's form, which would drop the endpoint.
+statement error
+ATTACH 'redshift://wg1.012345678901.us-east-1.redshift-serverless.amazonaws.com/memory' (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain);
+----
+Invalid Configuration Error: Invalid ATTACH: a Redshift handle cannot be named memory, which is DuckDB's default database; name the handle: ATTACH '<path>' AS <handle> (TYPE redshift, ...)
+
+statement error
+ATTACH 'redshift://wg1.012345678901.us-east-1.redshift-serverless.amazonaws.com/memory' (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain);
+----
+<!REGEX>:.*(012345678901|wg1|ATTACH '' AS).*
+
+# An explicit AS memory on a path gets the same remedy.
+statement error
+ATTACH 'redshift://wg1.012345678901.us-east-1.redshift-serverless.amazonaws.com/dev' AS memory (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain);
+----
+Invalid Configuration Error: Invalid ATTACH: a Redshift handle cannot be named memory, which is DuckDB's default database; name the handle: ATTACH '<path>' AS <handle> (TYPE redshift, ...)
+
+# ATTACH IF NOT EXISTS without AS returns the database already attached under the derived name and
+# never reaches the extension: an option it refuses goes unchecked, and the handle keeps its target.
+statement ok
+CALL truncate_duckdb_logs();
+
+statement ok
+ATTACH IF NOT EXISTS 'redshift://wg2.012345678901.us-east-1.redshift-serverless.amazonaws.com/dev' (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, HOST 'example.com');
+
+# From another DuckDB connection, whose session opens now, so the target it connects to is logged.
+statement ok con2
+SELECT * FROM redshift_query('dev', 'rows=1 cols=1');
+
+query II
+SELECT bool_or(message = 'redshift mock: opened a connection to region us-east-1, workgroup wg1, account 012345678901, database dev'),
+       bool_or(message LIKE '%wg2%')
+FROM duckdb_logs WHERE log_level = 'DEBUG';
+----
+true	false
+
+# The database it returns can be of any type.
+statement ok
+ATTACH ':memory:' AS analytics;
+
+statement ok
+ATTACH IF NOT EXISTS 'redshift://my-cluster.abc123xyz.us-east-1.redshift.amazonaws.com/analytics' (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain);
+
+query I
+SELECT type FROM duckdb_databases() WHERE database_name = 'analytics';
+----
+duckdb
+
+statement ok
+DETACH dev;
+
+statement ok
+DETACH "wg-a";
+
+statement ok
+DETACH "wg-b";
+
+statement ok
+DETACH main_db;
+
+statement ok
+DETACH analytics;
+
+statement ok
+DETACH rs_label;
+
+statement ok
+DETACH rs_arn;
+
+# These copy the duckdb-aws revision DuckDB pins: the ARN refusals tell apart the forms it resolves
+# (redshift_attach_path.cpp); the secret a cluster identifier takes without SECRET follows its
+# FindAwsSecret, and the AWS secret's read its default secret storage (redshift_aws_secret.cpp); the
+# region fallback follows its ResolveAwsRegion (redshift_attach_aws_forms.cpp); and the option names a
+# cluster identifier takes and ignores are its Redshift ATTACH's (redshift_attach_aws_forms.hpp), beside the
+# postgres extension's at the revision DuckDB pins (8b9d0bbe). When a pin moves, re-check each against
+# the new revision, then update every 1b96925 and 8b9d0bb citation (git grep 1b96925, git grep 8b9d0bb),
+# these checks included.
+query I
+SELECT contains(content, 'GIT_TAG 1b96925856ded7c9cbde7403fdb3d467d0cdf779') FROM read_text('duckdb/.github/config/extensions/aws.cmake');
+----
+true
+
+query I
+SELECT contains(content, 'GIT_TAG 8b9d0bbe8de4c57fb90d9e2530f9ce39f8c4baf3') FROM read_text('duckdb/.github/config/extensions/postgres_scanner.cmake');
+----
+true
+
+# A workgroup URI's port is the workgroup's port.
+statement ok
+ATTACH 'redshift://wg-a.lbl.us-east-1.redshift-serverless.amazonaws.com:65535' AS rs_label_port (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain);
+
+statement ok
+SELECT * FROM redshift_query('rs_label_port', 'rows=1 cols=1');
+
+query I
+SELECT bool_or(message = 'redshift mock: opened a connection to region us-east-1, workgroup wg-a, endpoint label lbl, port 65535')
+FROM duckdb_logs WHERE log_level = 'DEBUG';
+----
+true
+
+# HOST and PORT, the aws extension's options, go with a cluster identifier as the path, and beside a
+# redshift:// path where they repeat its host and the port it gives: the aws extension hands an ARN
+# that names its target by ID on as its target's redshift:// endpoint, with the options as written.
+# Beside the empty path, which gives neither, the refusal names the endpoint as the path.
+statement error
+ATTACH '' AS rs_bad (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, HOST 'wg1.012345678901.us-east-1.redshift-serverless.amazonaws.com');
+----
+Cannot attach rs_bad: Invalid parameter 'HOST': give the endpoint, and its port, as the path instead: ATTACH 'redshift://<endpoint>[:<port>]' AS <handle> (TYPE redshift, ...); without one, WORKGROUP and ACCOUNT_ID or CLUSTER name the endpoint
+
+statement error
+ATTACH 'redshift://wg1.012345678901.us-east-1.redshift-serverless.amazonaws.com' AS rs_bad (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, PORT 5440);
+----
+Cannot attach rs_bad: PORT must be the port the path or ARN gives. Leave PORT out, or give the port in the path: ATTACH 'redshift://<endpoint>:<port>' AS <handle> (TYPE redshift, ...)
+
+statement error
+ATTACH 'redshift://wg1.012345678901.us-east-1.redshift-serverless.amazonaws.com:5440/dev' AS rs_bad (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, HOST '127.0.0.1');
+----
+Cannot attach rs_bad: HOST must be the host the path or ARN names: the connection verifies the server's certificate against that name, so it cannot go through another address, such as a tunnel, a proxy or an IP address. Leave HOST out
+
+statement error
+ATTACH 'redshift://wg1.012345678901.us-east-1.redshift-serverless.amazonaws.com:5440/dev' AS rs_bad (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, DBNAME 'dev');
+----
+Cannot attach rs_bad: the path names the database, so DBNAME cannot be given too
+
+# The aws extension's options are checked as values before this extension's own.
+statement error
+ATTACH 'my-cluster' AS rs_bad (TYPE redshift, REGION 1, PORT '70000');
+----
+Cannot attach rs_bad: Invalid value for parameter 'PORT': it must be a number from 1 to 65535
+
+statement ok
+ATTACH 'redshift://wg1.012345678901.us-east-1.redshift-serverless.amazonaws.com:5440' AS rs_repeats (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, HOST 'WG1.012345678901.US-EAST-1.REDSHIFT-SERVERLESS.AMAZONAWS.COM', PORT '5440', DBNAME 'dev', DATABASE 'dev');
+
+statement ok
+DETACH rs_repeats;
+
+query I
+SELECT count(*) FROM duckdb_databases() WHERE database_name = 'rs_bad';
+----
+0
+
+# SECRET names a DuckDB aws or s3 secret; this build has no aws secret types, so only the refusals show
+# here (the C++ tests cover the read, with stand-ins for those types).
+statement error
+ATTACH '' AS rs_bad (TYPE redshift, REGION 'us-east-1', SECRET nope, CLUSTER 'c');
+----
+Cannot attach rs_bad: the aws or s3 secret the ATTACH named in SECRET, or chose for a cluster identifier path, does not exist: SECRET must name a DuckDB secret of type aws or s3
+
+statement error
+ATTACH '' AS rs_bad (TYPE redshift, REGION 'us-east-1', SECRET nope, CREDENTIAL_PROVIDER aws_default_chain, CLUSTER 'c');
+----
+Cannot attach rs_bad: Invalid parameter 'CREDENTIAL_PROVIDER': it is not valid with SECRET, whose aws or s3 secret gives the AWS credentials
+
+# A cluster identifier as the path, the aws extension's form, which that extension hands to this one
+# unchanged: the client looks the cluster up, as for CLUSTER. Without SECRET or CREDENTIAL_PROVIDER,
+# and with no aws or s3 secret in this build, it takes the default credential chain.
+statement ok
+CALL truncate_duckdb_logs();
+
+statement ok
+ATTACH 'my-cluster' AS rs_by_id (TYPE redshift, REGION 'us-east-1');
+
+# HOST, the cluster's own endpoint in any letter case, pins the connection to it and gives the region;
+# DBNAME is DATABASE; DURATION_SECONDS and the postgres extension's options are ignored.
+statement ok
+ATTACH 'my-cluster' AS rs_by_host (TYPE redshift, HOST 'MY-CLUSTER.ABC123XYZ.US-EAST-1.REDSHIFT.AMAZONAWS.COM', PORT '5440', DBNAME 'analytics', DURATION_SECONDS 900, SCHEMA 'public', ISOLATION_LEVEL 'serializable', USE_TEXT_PROTOCOL 'true', SECRET_STORAGE_TABLE 'x', CONNECT_DISPLAY 'mine');
+
+# Without AS, the handle is named after the cluster.
+statement ok
+ATTACH 'other-cluster' (TYPE redshift, REGION 'eu-west-1', DATABASE '');
+
+statement ok
+SELECT * FROM redshift_query('rs_by_id', 'rows=1 cols=1');
+
+statement ok
+SELECT * FROM redshift_query('rs_by_host', 'rows=1 cols=1');
+
+statement ok
+SELECT * FROM redshift_query('other-cluster', 'rows=1 cols=1');
+
+query III
+SELECT bool_or(message = 'redshift mock: opened a connection to region us-east-1, cluster my-cluster'),
+       bool_or(message = 'redshift mock: opened a connection to region us-east-1, cluster my-cluster, endpoint label abc123xyz, port 5440, database analytics'),
+       bool_or(message = 'redshift mock: opened a connection to region eu-west-1, cluster other-cluster')
+FROM duckdb_logs WHERE log_level = 'DEBUG';
+----
+true	true	true
+
+# Any other HOST is refused: the certificate is checked against the endpoint's name.
+statement error
+ATTACH 'my-cluster' AS rs_bad (TYPE redshift, REGION 'us-east-1', HOST '127.0.0.1', PORT '5439');
+----
+Cannot attach rs_bad: HOST must be the endpoint of the cluster the path names, <cluster>.<label>.<region>.redshift.amazonaws.com: the connection verifies the server's certificate against that name, so it cannot go through another address, such as a tunnel, a proxy or an IP address. Give the cluster as CLUSTER: ATTACH '' AS <handle> (TYPE redshift, CLUSTER '<cluster>', REGION '<region>', ...), or its endpoint as the path: ATTACH 'redshift://<cluster>.<label>.<region>.redshift.amazonaws.com[:<port>]' AS <handle> (TYPE redshift, ...)
+
+# DURATION_SECONDS is never read, so any value is ignored, beside any form.
+statement ok
+ATTACH 'my-cluster' AS rs_duration (TYPE redshift, REGION 'us-east-1', DURATION_SECONDS 'abc');
+
+statement ok
+DETACH rs_duration;
+
+statement ok
+ATTACH 'redshift://my-cluster.abc123xyz.us-east-1.redshift.amazonaws.com' AS rs_duration (TYPE redshift, REGION 'us-east-1', CREDENTIAL_PROVIDER aws_default_chain, DURATION_SECONDS -1);
+
+statement ok
+DETACH rs_duration;
+
+statement error
+ATTACH 'my-cluster' AS rs_bad (TYPE redshift, REGION 'us-east-1', PORT '70000');
+----
+Cannot attach rs_bad: Invalid value for parameter 'PORT': it must be a number from 1 to 65535
+
+# Without HOST the cluster is looked up and connected to at its own port, so PORT is refused there.
+statement error
+ATTACH 'my-cluster' AS rs_bad (TYPE redshift, REGION 'us-east-1', PORT '5439');
+----
+Cannot attach rs_bad: Invalid parameter 'PORT': without HOST the cluster is looked up and connected to at the port it listens on, so PORT cannot be honoured.
+
+# The aws extension's ARN options, and the target options, are still refused beside the path, and so
+# is a read-only handle.
+statement error
+ATTACH 'my-cluster' AS rs_bad (TYPE redshift, REGION 'us-east-1', RESOURCE_TYPE 'workgroup');
+----
+Cannot attach rs_bad: Invalid ATTACH option 'RESOURCE_TYPE'
+
+statement error
+ATTACH 'my-cluster' AS rs_bad (TYPE redshift, REGION 'us-east-1', ACCOUNT_ID '012345678901');
+----
+Cannot attach rs_bad: the path names the target, so WORKGROUP, ACCOUNT_ID and CLUSTER cannot be given too; to give the target as options, leave the path empty: ATTACH '' AS <handle> (TYPE redshift, ...)
+
+statement error
+ATTACH 'my-cluster' AS rs_bad (TYPE redshift, REGION 'us-east-1', READ_ONLY);
+----
+Cannot attach rs_bad: Invalid value true for ATTACH option 'READ_ONLY'
+
+query I
+SELECT count(*) FROM duckdb_databases() WHERE database_name = 'rs_bad';
+----
+0
+
+statement ok
+DETACH rs_by_id;
+
+statement ok
+DETACH rs_by_host;
+
+statement ok
+DETACH "other-cluster";

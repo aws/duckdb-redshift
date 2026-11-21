@@ -1,0 +1,6 @@
+# Kerberos for Windows DLLs the set does not ship, which its files load by name on the GSS path. The
+# rename rewrites each whole string naming one, with or without .dll, to '|' characters of the same
+# length, so a LoadLibrary of it fails and opens no file. rename_pin.py and rename_check.py read
+# this list.
+krbcc64
+leashw64

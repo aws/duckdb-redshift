@@ -1,0 +1,8 @@
+# The two third-party packages rename_pin.py uses, only at pin time and in the rename tests:
+# delvewheel's import-table routine and its pefile dependency. Each is taken by its SHA-256 into the
+# package cache (rename_pin.py fetch-tools), never by the build, from its --url: the wheel's PyPI
+# file, downloaded by download.sh and never through pip. Each row's name, version and SHA-256 are in
+# the name seed, so a changed row changes every generated name. A row without --hash is not pinned
+# yet, and the pin refuses to run it.
+delvewheel==1.10.0 --hash=sha256:6abac69d13b39428a0fa3679d43a45ec6ff315bfef37dba0df53240fa3034372 --url=https://files.pythonhosted.org/packages/c8/48/4ef5287b9579326540d577b86ab66edb56b2dc2b895c3914a1453d947d62/delvewheel-1.10.0-py3-none-any.whl
+pefile==2024.8.26 --hash=sha256:76f8b485dcd3b1bb8166f1128d395fa3d87af26360c2358fb75b80019b957c6f --url=https://files.pythonhosted.org/packages/54/16/12b82f791c7f50ddec566873d5bdd245baa1491bac11d15ffb98aecc8f8b/pefile-2024.8.26-py3-none-any.whl
